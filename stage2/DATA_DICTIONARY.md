@@ -13,16 +13,16 @@ This document describes the variables computed in the Stage 2 bond data pipeline
 
 2. [Signal Definitions](#signal-definitions)
    - [Bond Identifiers and Return Metrics](#bond-identifiers-and-return-metrics)
-   - [Panel A: Bond Characteristics](#panel-a-bond-characteristics)
-   - [Panel B: Spreads, Yields, and Size](#panel-b-spreads-yields-and-size)
-   - [Panel C: Value](#panel-c-value)
-   - [Panel D: Momentum & Reversal](#panel-d-momentum--reversal)
-   - [Panel E: Illiquidity](#panel-e-illiquidity)
-   - [Panel F: Volatility & Risk](#panel-f-volatility--risk)
-   - [Panel G: Market Betas](#panel-g-market-betas)
-   - [Panel H: Credit & Default Betas](#panel-h-credit--default-betas)
-   - [Panel I: Volatility & Liquidity Betas](#panel-i-volatility--liquidity-betas)
-   - [Panel J: Macro & Other Betas](#panel-j-macro--other-betas)
+   - [Bond Characteristics](#bond-characteristics)
+   - [Cluster I: Spreads, Yields, and Size](#cluster-i-spreads-yields-and-size)
+   - [Cluster II: Value](#cluster-ii-value)
+   - [Cluster III: Momentum & Reversal](#cluster-iii-momentum--reversal)
+   - [Cluster IV: Illiquidity](#cluster-iv-illiquidity)
+   - [Cluster V: Volatility & Risk](#cluster-v-volatility--risk)
+   - [Cluster VI: Market Betas](#cluster-vi-market-betas)
+   - [Cluster VII: Credit & Default Betas](#cluster-vii-credit--default-betas)
+   - [Cluster VIII: Volatility & Liquidity Betas](#cluster-viii-volatility--liquidity-betas)
+   - [Cluster IX: Macro & Other Betas](#cluster-ix-macro--other-betas)
 
 3. [Bond Returns](#bond-returns)
    - [Month-End Return (`ret_vw`)](#month-end-return-ret_vw)
@@ -60,11 +60,13 @@ This document describes the variables computed in the Stage 2 bond data pipeline
 
 All data in the panel is sampled at the end of month $t$; no variables have a lead or a lag.
 
+**Sample start dates:** Most signals have a sample start date of 2002-08, including those that require a rolling estimation period. Signals requiring rolling data use ICE/BofA data to generate observations prior to 2002-08, enabling a consistent start date of 2002-08 for the main panel. Rolling signals that require TRACE-based illiquidity data (e.g., Amihud and Pastor-Stambaugh liquidity betas) start 2003-08.
+
 Several datasets are available on the [Open Bond Asset Pricing](https://openbondassetpricing.com/) website.
 
 ### Market Microstructure Adjusted Signals and Returns
 
-The main panel includes several identifiers, additional variables, and signals. As standard, we provide market microstructure-adjusted (MMN) price-based signals, which includes all variables related to bond price, yield, spread, value, illiquidity, within-month risk, and daily betas. These signals are computed with a 1–10 business day gap before the month-end price used for returns. The methodology is outlined in the [Signal Gap](#signal-gap-for-price-based-signals) section below.
+The main panel includes several identifiers, additional variables, and signals. As standard, we provide market microstructure-adjusted (MMN) price-based signals, which includes all variables related to bond price, yield, spread, value, illiquidity, within-month risk, and daily betas. The signals employ a minimum 1-business day gap before the month-end price used for returns. The average (median) day gap is 1.68 (1) day. The maximum allowed gap is capped at 10 business days, although this is extremely rare (P99 of the signal gap is 5 days). The methodology is outlined in the [Signal Gap](#signal-gap-for-price-based-signals) section below.
 
 **Main panel usage:** Use month-end returns (`ret_vw`) with the MMN-adjusted signals provided in the main panel.
 
@@ -140,14 +142,12 @@ For all signals requiring a rolling window (betas, VaR, ES), we use a 36-month r
 
 ---
 
-### Panel A: Bond Characteristics
+### Bond Characteristics
 
 | Mnemonic | Name | Description |
 |----------|------|-------------|
 | `spc_rat` | S&P Composite Rating | Composite credit rating: S&P rating if available, otherwise Moody's rating. Scale: 1 (AAA) to 21 (CCC-), 22 = Default. |
 | `mdc_rat` | Moody's Composite Rating | Composite credit rating: Moody's rating if available, otherwise S&P rating. Scale: 1 (AAA) to 21 (CCC-), 22 = Default. |
-| `tmat` | Time to Maturity | Years remaining until bond maturity. |
-| `age` | Bond Age | Years since bond issuance. |
 | `call` | Callable Indicator | Indicator for embedded call option (1 = callable, 0 = non-callable). |
 | `fce_val` | Face Value | Bond amount outstanding (face value); units of the bond outstanding. |
 | `144a` | Rule 144A Indicator | Dummy variable: 1 if bond is Rule 144A, 0 otherwise. |
@@ -155,10 +155,12 @@ For all signals requiring a rolling window (betas, VaR, ES), we use a 36-month r
 
 ---
 
-### Panel B: Spreads, Yields, and Size
+### Cluster I: Spreads, Yields, and Size
 
 | Mnemonic | Name | Description |
 |----------|------|-------------|
+| `tmat` | Time to Maturity | Years remaining until bond maturity. |
+| `age` | Bond Age | Years since bond issuance. |
 | `ytm` | Yield to Maturity | Annualized yield to maturity. |
 | `cs` | Credit Spread | Annualized credit spread: yield minus maturity-matched U.S. Treasury yield. |
 | `md_dur` | Modified Duration | Modified duration measuring price sensitivity to yield changes. |
@@ -169,7 +171,7 @@ For all signals requiring a rolling window (betas, VaR, ES), we use a 36-month r
 
 ---
 
-### Panel C: Value
+### Cluster II: Value
 
 | Mnemonic | Name | Description |
 |----------|------|-------------|
@@ -181,7 +183,7 @@ For all signals requiring a rolling window (betas, VaR, ES), we use a 36-month r
 
 ---
 
-### Panel D: Momentum & Reversal
+### Cluster III: Momentum & Reversal
 
 | Mnemonic | Name | Description |
 |----------|------|-------------|
@@ -209,7 +211,7 @@ For all signals requiring a rolling window (betas, VaR, ES), we use a 36-month r
 
 ---
 
-### Panel E: Illiquidity
+### Cluster IV: Illiquidity
 
 | Mnemonic | Name | Description |
 |----------|------|-------------|
@@ -229,7 +231,7 @@ For all signals requiring a rolling window (betas, VaR, ES), we use a 36-month r
 
 ---
 
-### Panel F: Volatility & Risk
+### Cluster V: Volatility & Risk
 
 | Mnemonic | Name | Description |
 |----------|------|-------------|
@@ -252,7 +254,7 @@ For all signals requiring a rolling window (betas, VaR, ES), we use a 36-month r
 
 ---
 
-### Panel G: Market Betas
+### Cluster VI: Market Betas
 
 | Mnemonic | Name | Description |
 |----------|------|-------------|
@@ -268,7 +270,7 @@ For all signals requiring a rolling window (betas, VaR, ES), we use a 36-month r
 
 ---
 
-### Panel H: Credit & Default Betas
+### Cluster VII: Credit & Default Betas
 
 | Mnemonic | Name | Description |
 |----------|------|-------------|
@@ -279,7 +281,7 @@ For all signals requiring a rolling window (betas, VaR, ES), we use a 36-month r
 
 ---
 
-### Panel I: Volatility & Liquidity Betas
+### Cluster VIII: Volatility & Liquidity Betas
 
 | Mnemonic | Name | Description |
 |----------|------|-------------|
@@ -299,7 +301,7 @@ For all signals requiring a rolling window (betas, VaR, ES), we use a 36-month r
 
 ---
 
-### Panel J: Macro & Other Betas
+### Cluster IX: Macro & Other Betas
 
 | Mnemonic | Name | Description |
 |----------|------|-------------|
