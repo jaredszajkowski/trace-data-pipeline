@@ -24,82 +24,82 @@ if [[ ! -d "stage0" ]] || [[ ! -d "stage1" ]]; then
     exit 1
 fi
 
-# Check available disk space (use quota on WRDS, fallback to df elsewhere)
-echo ""
-echo "=== DISK SPACE CHECK ==="
+# # Check available disk space (use quota on WRDS, fallback to df elsewhere)
+# echo ""
+# echo "=== DISK SPACE CHECK ==="
 
-# Try WRDS quota command first (more accurate for WRDS users)
-if command -v quota &> /dev/null; then
-    # Parse quota output for Home directory
-    # Expected format: "Home:  7.88GB / 10GB"
-    QUOTA_LINE=$(quota 2>/dev/null | grep -i "Home:" | head -1)
+# # Try WRDS quota command first (more accurate for WRDS users)
+# if command -v quota &> /dev/null; then
+#     # Parse quota output for Home directory
+#     # Expected format: "Home:  7.88GB / 10GB"
+#     QUOTA_LINE=$(quota 2>/dev/null | grep -i "Home:" | head -1)
 
-    if [[ -n "$QUOTA_LINE" ]]; then
-        # Extract used and limit from "Home:  7.88GB / 10GB"
-        USED=$(echo "$QUOTA_LINE" | awk '{print $2}' | sed 's/GB//g')
-        LIMIT=$(echo "$QUOTA_LINE" | awk '{print $4}' | sed 's/GB//g')
+#     if [[ -n "$QUOTA_LINE" ]]; then
+#         # Extract used and limit from "Home:  7.88GB / 10GB"
+#         USED=$(echo "$QUOTA_LINE" | awk '{print $2}' | sed 's/GB//g')
+#         LIMIT=$(echo "$QUOTA_LINE" | awk '{print $4}' | sed 's/GB//g')
 
-        if [[ -n "$USED" ]] && [[ -n "$LIMIT" ]]; then
-            # Calculate available space
-            AVAIL_GB=$(awk "BEGIN {printf \"%.2f\", $LIMIT - $USED}")
-            echo "[info] WRDS Quota - Home directory: ${USED} GB used / ${LIMIT} GB limit"
-            echo "[info] Available space: ${AVAIL_GB} GB"
-        else
-            # Quota parsing failed, fall back to df
-            echo "[warn] Could not parse quota output, using df instead"
-            AVAIL_KB=$(df -k . | awk 'NR==2 {print $4}')
-            AVAIL_GB=$(awk "BEGIN {printf \"%.2f\", $AVAIL_KB/1024/1024}")
-            echo "[info] Available disk space (filesystem): ${AVAIL_GB} GB"
-        fi
-    else
-        # quota command exists but no Home line found, fall back to df
-        echo "[info] No quota detected, checking filesystem space"
-        AVAIL_KB=$(df -k . | awk 'NR==2 {print $4}')
-        AVAIL_GB=$(awk "BEGIN {printf \"%.2f\", $AVAIL_KB/1024/1024}")
-        echo "[info] Available disk space: ${AVAIL_GB} GB"
-    fi
-else
-    # quota command not available (non-WRDS system), use df
-    echo "[info] Checking filesystem space (quota not available)"
-    AVAIL_KB=$(df -k . | awk 'NR==2 {print $4}')
-    AVAIL_GB=$(awk "BEGIN {printf \"%.2f\", $AVAIL_KB/1024/1024}")
-    echo "[info] Available disk space: ${AVAIL_GB} GB"
-fi
+#         if [[ -n "$USED" ]] && [[ -n "$LIMIT" ]]; then
+#             # Calculate available space
+#             AVAIL_GB=$(awk "BEGIN {printf \"%.2f\", $LIMIT - $USED}")
+#             echo "[info] WRDS Quota - Home directory: ${USED} GB used / ${LIMIT} GB limit"
+#             echo "[info] Available space: ${AVAIL_GB} GB"
+#         else
+#             # Quota parsing failed, fall back to df
+#             echo "[warn] Could not parse quota output, using df instead"
+#             AVAIL_KB=$(df -k . | awk 'NR==2 {print $4}')
+#             AVAIL_GB=$(awk "BEGIN {printf \"%.2f\", $AVAIL_KB/1024/1024}")
+#             echo "[info] Available disk space (filesystem): ${AVAIL_GB} GB"
+#         fi
+#     else
+#         # quota command exists but no Home line found, fall back to df
+#         echo "[info] No quota detected, checking filesystem space"
+#         AVAIL_KB=$(df -k . | awk 'NR==2 {print $4}')
+#         AVAIL_GB=$(awk "BEGIN {printf \"%.2f\", $AVAIL_KB/1024/1024}")
+#         echo "[info] Available disk space: ${AVAIL_GB} GB"
+#     fi
+# else
+#     # quota command not available (non-WRDS system), use df
+#     echo "[info] Checking filesystem space (quota not available)"
+#     AVAIL_KB=$(df -k . | awk 'NR==2 {print $4}')
+#     AVAIL_GB=$(awk "BEGIN {printf \"%.2f\", $AVAIL_KB/1024/1024}")
+#     echo "[info] Available disk space: ${AVAIL_GB} GB"
+# fi
 
-# Check if less than 4 GB available
-if (( $(awk "BEGIN {print ($AVAIL_GB < 4.0)}") )); then
-    echo ""
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║                         !   WARNING  !                         ║"
-    echo "╠════════════════════════════════════════════════════════════════╣"
-    echo "║  INSUFFICIENT DISK SPACE DETECTED                              ║"
-    echo "║                                                                ║"
-    echo "║  Available: ${AVAIL_GB} GB                                     ║"
-    echo "║  Required:  At least 4.0 GB recommended                        ║"
-    echo "║                                                                ║"
-    echo "║  The pipeline generates large intermediate files and may fail  ║"
-    echo "║  or corrupt data if disk space runs out during processing.     ║"
-    echo "║                                                                ║"
-    echo "║  RECOMMENDATION: Stop execution and free up disk space         ║"
-    echo "║                                                                ║"
-    echo "║  To continue anyway: Re-run with FORCE_RUN=1                   ║"
-    echo "║  Example: FORCE_RUN=1 ./run_pipeline.sh                        ║"
-    echo "╚════════════════════════════════════════════════════════════════╝"
-    echo ""
+# # Check if less than 4 GB available
+# if (( $(awk "BEGIN {print ($AVAIL_GB < 4.0)}") )); then
+#     echo ""
+#     echo "╔════════════════════════════════════════════════════════════════╗"
+#     echo "║                         !   WARNING  !                         ║"
+#     echo "╠════════════════════════════════════════════════════════════════╣"
+#     echo "║  INSUFFICIENT DISK SPACE DETECTED                              ║"
+#     echo "║                                                                ║"
+#     echo "║  Available: ${AVAIL_GB} GB                                     ║"
+#     echo "║  Required:  At least 4.0 GB recommended                        ║"
+#     echo "║                                                                ║"
+#     echo "║  The pipeline generates large intermediate files and may fail  ║"
+#     echo "║  or corrupt data if disk space runs out during processing.     ║"
+#     echo "║                                                                ║"
+#     echo "║  RECOMMENDATION: Stop execution and free up disk space         ║"
+#     echo "║                                                                ║"
+#     echo "║  To continue anyway: Re-run with FORCE_RUN=1                   ║"
+#     echo "║  Example: FORCE_RUN=1 ./run_pipeline.sh                        ║"
+#     echo "╚════════════════════════════════════════════════════════════════╝"
+#     echo ""
 
-    # Allow override with FORCE_RUN environment variable
-    if [[ "${FORCE_RUN:-0}" != "1" ]]; then
-        echo "[error] Exiting due to insufficient disk space."
-        echo "[info] Free up space or set FORCE_RUN=1 to override this check."
-        exit 1
-    else
-        echo "[warn] FORCE_RUN=1 detected - continuing despite low disk space"
-        echo "[warn] Proceed at your own risk!"
-    fi
-else
-    echo "[ok] Sufficient disk space available (${AVAIL_GB} GB >= 4.0 GB)"
-fi
-echo ""
+#     # Allow override with FORCE_RUN environment variable
+#     if [[ "${FORCE_RUN:-0}" != "1" ]]; then
+#         echo "[error] Exiting due to insufficient disk space."
+#         echo "[info] Free up space or set FORCE_RUN=1 to override this check."
+#         exit 1
+#     else
+#         echo "[warn] FORCE_RUN=1 detected - continuing despite low disk space"
+#         echo "[warn] Proceed at your own risk!"
+#     fi
+# else
+#     echo "[ok] Sufficient disk space available (${AVAIL_GB} GB >= 4.0 GB)"
+# fi
+# echo ""
 
 # Create log directories for all stages
 echo "[setup] Creating log directories..."
@@ -177,28 +177,66 @@ else
     echo "[ok] All required data files present"
 fi
 
-# Stage 0: Submit Enhanced, Standard, and 144A TRACE data extraction jobs
-# These run in parallel and use the stage0 directory as working directory
+# # Stage 0: Submit Enhanced, Standard, and 144A TRACE data extraction jobs
+# # These run in parallel and use the stage0 directory as working directory
+# echo ""
+# echo "=== STAGE 0: TRACE Data Extraction ==="
+# echo "[submit] Enhanced TRACE ..."
+# J1=$(qsub -terse -N trace_enhanced stage0/run_enhanced_trace.sh)
+
+# echo "[submit] Standard TRACE ..."
+# J2=$(qsub -terse -N trace_standard stage0/run_standard_trace.sh)
+
+# echo "[submit] 144A TRACE ..."
+# J3=$(qsub -terse -N trace_144a stage0/run_144a_trace.sh)
+
+# # Stage 0: Build data reports after all extraction jobs complete
+# echo "[submit] Build data reports (waits for all TRACE jobs) ..."
+# J4=$(qsub -terse -N build_reports -hold_jid ${J1},${J2},${J3} stage0/run_build_data_reports.sh)
+
+# # Stage 1: Process daily aggregation after stage0 reports are ready
+# echo ""
+# echo "=== STAGE 1: Daily Aggregation & Analytics ==="
+# echo "[submit] Stage 1 pipeline (waits for stage0 reports) ..."
+# J5=$(qsub -terse -N stage1_pipeline -hold_jid ${J4} stage1/run_stage1.sh)
+
+# Stage 0: Run Enhanced, Standard, and 144A TRACE data extraction jobs sequentially
 echo ""
 echo "=== STAGE 0: TRACE Data Extraction ==="
-echo "[submit] Enhanced TRACE ..."
-J1=$(qsub -terse -N trace_enhanced stage0/run_enhanced_trace.sh)
 
-echo "[submit] Standard TRACE ..."
-J2=$(qsub -terse -N trace_standard stage0/run_standard_trace.sh)
+echo "[running] Enhanced TRACE ..."
+bash stage0/run_enhanced_trace.sh > stage0/logs/trace_enhanced.log 2>&1 &
+J1=$!
 
-echo "[submit] 144A TRACE ..."
-J3=$(qsub -terse -N trace_144a stage0/run_144a_trace.sh)
+wait $J1
+echo "[ok] Enhanced TRACE completed"
+
+echo "[running] Standard TRACE ..."
+bash stage0/run_standard_trace.sh > stage0/logs/trace_standard.log 2>&1 &
+J2=$!
+
+wait $J2
+echo "[ok] Standard TRACE completed"
+
+echo "[running] 144A TRACE ..."
+bash stage0/run_144a_trace.sh > stage0/logs/trace_144a.log 2>&1 &
+J3=$!
+
+wait $J3
+echo "[ok] 144A TRACE completed"
+echo "[ok] All TRACE extraction jobs completed"
 
 # Stage 0: Build data reports after all extraction jobs complete
-echo "[submit] Build data reports (waits for all TRACE jobs) ..."
-J4=$(qsub -terse -N build_reports -hold_jid ${J1},${J2},${J3} stage0/run_build_data_reports.sh)
+echo "[running] Build data reports ..."
+bash stage0/run_build_data_reports.sh > stage0/logs/build_reports.log 2>&1
+echo "[ok] Data reports completed"
 
 # Stage 1: Process daily aggregation after stage0 reports are ready
 echo ""
 echo "=== STAGE 1: Daily Aggregation & Analytics ==="
-echo "[submit] Stage 1 pipeline (waits for stage0 reports) ..."
-J5=$(qsub -terse -N stage1_pipeline -hold_jid ${J4} stage1/run_stage1.sh)
+echo "[running] Stage 1 pipeline ..."
+bash stage1/run_stage1.sh > stage1/logs/stage1_pipeline.log 2>&1
+echo "[ok] Stage 1 pipeline completed"
 
 # Stage 2: (Future placeholder)
 # echo ""
