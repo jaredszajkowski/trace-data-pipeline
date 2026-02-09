@@ -3,9 +3,8 @@
 #SBATCH --output=%j_trace-data-pipeline.out
 #SBATCH --error=%j_trace-data-pipeline.err
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem-per-cpu=16000
+#SBATCH --mem-per-cpu=8000
 #SBATCH --partition=build
 #SBATCH --time=6:00:00
 #SBATCH --account=finm32900
@@ -14,12 +13,14 @@
 
 # Change to the directory for trace-data-pipeline
 cd /home/jszajkowski/trace-data-pipeline
+echo "Changed to trace-data-pipeline directory"
 
 # Point to .pgpass file in home directory
 #export PGPASSFILE=/home/jszajkowski/.pgpass
 
 # Activate Python virtual environment
 source /project/finm32900/tdp-venv-p3119/bin/activate
+echo "Activated virtual environment"
 
 # Test WRDS connectivity
 # echo "Testing WRDS connection..."
@@ -35,4 +36,5 @@ source /project/finm32900/tdp-venv-p3119/bin/activate
 # ping -c 3 www.google.com || echo "Cannot ping google"
 
 # Run the pipeline
+echo "Executing pipeline"
 ./run_pipeline.sh
