@@ -10,6 +10,7 @@ Created: 2025-11-17
 """
 
 import os
+import decouple
 
 # ============================================================================
 # CREDENTIALS
@@ -18,12 +19,14 @@ import os
 # Set in your shell: export WRDS_USERNAME="your_id"
 #
 # If not set as environment variable, fallback to hardcoded default:
-WRDS_USERNAME = os.getenv("WRDS_USERNAME", "your_wrds_username")
+# WRDS_USERNAME = os.getenv("WRDS_USERNAME", "your_wrds_username")
+WRDS_USERNAME = decouple.config("WRDS_USERNAME")
 
 # ============================================================================
 # AUTHOR INFORMATION -- Change accordingly please
 # ============================================================================
-AUTHOR = "Open Source Bond Asset Pricing"
+# AUTHOR = "Open Source Bond Asset Pricing"
+AUTHOR = decouple.config("AUTHOR")
 
 # ============================================================================
 # SHARED OUTPUT SETTINGS

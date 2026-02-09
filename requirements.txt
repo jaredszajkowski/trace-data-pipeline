@@ -33,3 +33,6 @@ matplotlib>=3.8.0
 
 # Note: All other dependencies are from Python standard library
 # (logging, time, gc, functools, typing, pathlib, sys, os, datetime)
+
+# Handle environment variables
+python-decouple
