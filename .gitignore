@@ -51,6 +51,7 @@ ipython_config.py
 .venv
 
 # Data files - DO NOT commit large data files!
+_data/
 *.parquet
 *.csv
 *.csv.gz
