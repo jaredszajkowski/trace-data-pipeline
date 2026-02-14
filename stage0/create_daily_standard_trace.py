@@ -971,7 +971,7 @@ def clean_trace_data(
         all_super_list.append(AllData)
                
         elapsed_time = round(time.time() - start_time, 2)
-        logging.info(f"Chunk {i+1}: took {elapsed_time} seconds")
+        logging.info(f"Chunk {i}: took {elapsed_time} seconds")
         logging.info("-" * 50)  
             
     if all_super_list:
