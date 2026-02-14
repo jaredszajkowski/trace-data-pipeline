@@ -508,7 +508,7 @@ def clean_trace_data(
               AND TRIM(cusip_id) != ''
         ''', params=parm)
        
-        logging.info(f"Chunk {i+1}: Retrieved {len(trace)} rows from WRDS")
+        logging.info(f"Chunk {i}: Retrieved {len(trace)} rows from WRDS")
         
         if len(trace) == 0:
             continue
