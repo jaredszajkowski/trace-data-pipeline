@@ -512,7 +512,7 @@ def clean_trace_data(
 
         # Log initial retrieval time
         retrieval_elapsed_time = round(time.time() - start_time, 2)
-        logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds
+        logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds")
         
         if len(trace) == 0:
             continue
