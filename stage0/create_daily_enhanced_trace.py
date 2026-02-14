@@ -520,6 +520,7 @@ def clean_trace_data(
         log_filter(trace, trace, "start", i)
         
         # Filter 1: Dick-Nielsen
+        temp_filter_time = time.time()  # Start timer for filter
         if f["dick_nielsen"]:
             clean_chunk = clean_trace_chunk(
                 trace,
@@ -537,8 +538,13 @@ def clean_trace_data(
                
         # Pre decimal sort #
         trace = trace.sort_values(sort_cols, kind="mergesort", ignore_index=True)
+
+        # Log filter time
+        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        logging.info(f"Filter took {filter_elapsed_time} seconds")
        
-        # Filter 2: Decimal Correction 
+        # Filter 2: Decimal Correction
+        temp_filter_time = time.time()  # Start timer for filter
         if f["decimal_shift_corrector"]:
             _ds_defaults = dict(
                 id_col="cusip_id",
@@ -570,8 +576,13 @@ def clean_trace_data(
         else:
             log_filter(trace, trace, "decimal_shift (skipped)", i, replace=True, n_rows_replaced=0)
         gc.collect()
+
+        # Log filter time
+        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        logging.info(f"Filter took {filter_elapsed_time} seconds")
                        
         # Filter 3: Trading Time                
+        temp_filter_time = time.time()  # Start timer for filter
         if f["trading_time"]:
             before_time = trace
             trace = filter_by_trade_time(
@@ -586,7 +597,12 @@ def clean_trace_data(
         else:
             log_filter(trace, trace, "trading_time_filter (skipped)", i)
 
-        # Filter 4: Trading Calendar       
+        # Log filter time
+        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        logging.info(f"Filter took {filter_elapsed_time} seconds")
+
+        # Filter 4: Trading Calendar
+        temp_filter_time = time.time()  # Start timer for filter
         if f["trading_calendar"]:
             before_calr = trace
             trace = filter_by_calendar(
@@ -603,8 +619,12 @@ def clean_trace_data(
         else:
             log_filter(trace, trace, "calendar_filter (skipped)", i)
 
+        # Log filter time
+        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        logging.info(f"Filter took {filter_elapsed_time} seconds")
         
-        # Filter 5: Prices                      
+        # Filter 5: Prices
+        temp_filter_time = time.time()  # Start timer for filter
         if f["price_filters"]:
             trace = filter_with_log(trace, trace['rptd_pr'] > 0,     "neg_price_filter",   i)
             trace = filter_with_log(trace, trace['rptd_pr'] <= 1000, "large_price_filter", i)
@@ -612,7 +632,12 @@ def clean_trace_data(
             log_filter(trace, trace, "neg_price_filter (skipped)",   i)
             log_filter(trace, trace, "large_price_filter (skipped)", i)
 
-        # Filter 6: Trading Volume    
+        # Log filter time
+        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        logging.info(f"Filter took {filter_elapsed_time} seconds")
+
+        # Filter 6: Trading Volume
+        temp_filter_time = time.time()  # Start timer for filter
         # Compute dollar volume
         # entrd_vol_qt is in DOLLARS
         # https://wrds-www.wharton.upenn.edu/documents/1241/TRACE_Enhanced_Corporate_and_Agency_Historic_Data_File_Layout_post_2_6_12_10252024v.pdf
@@ -637,8 +662,13 @@ def clean_trace_data(
         
         # Pre BB sort #
         trace = trace.sort_values(sort_cols, kind="mergesort", ignore_index=True)
+
+        # Log filter time
+        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        logging.info(f"Filter took {filter_elapsed_time} seconds")
         
         # Filter 7: Bounce-Back
+        temp_filter_time = time.time()  # Start timer for filter
         if f["bounce_back_filter"]:            
             _bb_defaults = dict(
                 id_col="cusip_id",
@@ -678,16 +708,26 @@ def clean_trace_data(
             gc.collect()
         else:
             log_filter(trace, trace, "bounce_back_filter (skipped)", i)
-        gc.collect()    
+        gc.collect()
+
+        # Log filter time        
+        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        logging.info(f"Filter took {filter_elapsed_time} seconds")  
                         
         # Filter 8: Yield != Price
+        temp_filter_time = time.time()  # Start timer for filter
         if f["yld_price_filter"]:
             mask = (trace["rptd_pr"] != trace["yld_pt"]) | trace["yld_pt"].isna()
             trace = filter_with_log(trace, mask, "price_yld_filter", i)
         else:
             log_filter(trace, trace, "price_yld_filter (skipped)", i)
 
-        # Filter 9: Amount-outstanding vs. volume filter            
+        # Log filter time
+        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        logging.info(f"Filter took {filter_elapsed_time} seconds")
+
+        # Filter 9: Amount-outstanding vs. volume filter
+        temp_filter_time = time.time()  # Start timer for filter
         trace = trace.merge(fisd_off, how="left", left_on='cusip_id', right_on='cusip_id')
         if f["amtout_volume_filter"]:
             trace = filter_with_log(
@@ -699,7 +739,12 @@ def clean_trace_data(
         else:
             log_filter(trace, trace, "volume_offamt_filter (skipped)", i)
 
+        # Log filter time
+        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        logging.info(f"Filter took {filter_elapsed_time} seconds")
+
         # Filter 10: Execution date cannot exceed maturity
+        temp_filter_time = time.time()  # Start timer for filter
         if f["trd_exe_mat_filter"]:
             trace = filter_with_log(
                 trace,
@@ -710,7 +755,12 @@ def clean_trace_data(
         else:
             log_filter(trace, trace, "exctn_mat_dt_filter (skipped)", i)
 
+        # Log filter time
+        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        logging.info(f"Filter took {filter_elapsed_time} seconds")
+
         # Filter 11: Initial Price Errors
+        temp_filter_time = time.time()  # Start timer for filter
         if f["flag_initial_price_errors"]:
             _ie_defaults = dict(
                 id_col="cusip_id",
@@ -736,6 +786,10 @@ def clean_trace_data(
         else:
             log_filter(trace, trace, "init_price_error_filter (skipped)", i)
         gc.collect()
+
+        # Log filter time
+        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        logging.info(f"Filter took {filter_elapsed_time} seconds")
 
         #* ************************************** */
         #* DAILY AGGREGATION                      */
