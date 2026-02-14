@@ -245,14 +245,20 @@ echo "=== STAGE 0: TRACE Data Extraction ==="
 echo "[running] Enhanced TRACE ..."
 bash stage0/run_enhanced_trace.sh > stage0/logs/trace_enhanced.log 2>&1 &
 J1=$!
+wait $J1
+echo "[ok] Enhanced TRACE completed"
 
 echo "[running] Standard TRACE ..."
 bash stage0/run_standard_trace.sh > stage0/logs/trace_standard.log 2>&1 &
 J2=$!
+wait $J2
+echo "[ok] Standard TRACE completed"
 
 echo "[running] 144A TRACE ..."
 bash stage0/run_144a_trace.sh > stage0/logs/trace_144a.log 2>&1 &
 J3=$!
+wait $J3
+echo "[ok] 144A TRACE completed"
 
 # Wait for all three to complete
 echo "[waiting] Waiting for all TRACE extraction jobs..."
@@ -261,14 +267,18 @@ echo "[ok] All TRACE extraction jobs completed"
 
 # Stage 0: Build data reports after all extraction jobs complete
 echo "[running] Build data reports ..."
-bash stage0/run_build_data_reports.sh > stage0/logs/build_reports.log 2>&1
+bash stage0/run_build_data_reports.sh > stage0/logs/build_reports.log 2>&1 &
+J4=$!
+wait $J4
 echo "[ok] Data reports completed"
 
 # Stage 1: Process daily aggregation after stage0 reports are ready
 echo ""
 echo "=== STAGE 1: Daily Aggregation & Analytics ==="
 echo "[running] Stage 1 pipeline ..."
-bash stage1/run_stage1.sh > stage1/logs/stage1_pipeline.log 2>&1
+bash stage1/run_stage1.sh > stage1/logs/stage1_pipeline.log 2>&1 &
+J5=$!
+wait $J5
 echo "[ok] Stage 1 pipeline completed"
 
 # Stage 2: (Future placeholder)
