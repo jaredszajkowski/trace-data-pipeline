@@ -488,6 +488,8 @@ def clean_trace_data(
     sort_cols = ["cusip_id","trd_exctn_dt","trd_exctn_tm",
                  "trd_rpt_dt","trd_rpt_tm","msg_seq_nb"]
     
+    clean_start_time = time.time()  # Start total timer for cleaning process
+    
     for i in range(0, len(cusip_chunks)):  
         start_time = time.time()  # Start timer
         # logging.info(f"Processing chunk {i+1} of {len(cusip_chunks)}")        
@@ -813,7 +815,11 @@ def clean_trace_data(
         elapsed_time = round(time.time() - start_time, 2)
         # logging.info(f"Chunk {i+1}: took {elapsed_time} seconds")
         logging.info(f"Chunk {i}: took {elapsed_time} seconds")
-        logging.info("-" * 50)  
+        logging.info("-" * 50)
+
+        # Log elapsed time for the cleaning process
+        clean_elapsed_time = round(time.time() - clean_start_time, 2)
+        logging.info(f"Total elapsed time: {clean_elapsed_time/60} minutes")
             
     if all_super_list:
         final_df = pd.concat(all_super_list, ignore_index=True)
