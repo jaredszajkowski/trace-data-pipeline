@@ -818,9 +818,8 @@ def clean_trace_data(
         logging.info("-" * 50)
 
         # Log elapsed time for the cleaning process
-        clean_elapsed_time = round(time.time() - clean_start_time, 2)
-        clean_elapsed_time_minutes = clean_elapsed_time / 60
-        logging.info(f"Total elapsed time: {clean_elapsed_time_minutes} minutes")
+        clean_elapsed_time = round((time.time() - clean_start_time) / 60, 2)
+        logging.info(f"Total elapsed time: {clean_elapsed_time} minutes")
         logging.info("-" * 50)
             
     if all_super_list:
