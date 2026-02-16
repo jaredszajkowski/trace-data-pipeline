@@ -20,6 +20,7 @@ import time
 import wrds
 import gc
 from functools import reduce
+from multiprocessing import Pool, Process
 import pyarrow as pa
 import pandas_market_calendars as mcal
 RUN_STAMP = pd.Timestamp.today().strftime("%Y%m%d")
@@ -388,7 +389,40 @@ def compute_trace_all_metrics(trace):
 
     # sort rows for tidy output
     merged = merged.sort_values(['cusip_id','trd_exctn_dt']).reset_index(drop=True)
-    return merged    
+    return merged
+# -------------------------------------------------------------------------
+def _pull_all_chunks(cusip_chunks, wrds_username):
+    """Pull WRDS data for each CUSIP chunk and write to parquet files.
+
+    Opens its own WRDS connection (runs in a separate process).
+    """
+    db = wrds.Connection(wrds_username=wrds_username)
+    try:
+        Path("./_data").mkdir(parents=True, exist_ok=True)
+        for i in range(len(cusip_chunks)):
+            pull_start_time = time.time()
+            logging.info(f"Retrieving chunk {i} of {len(cusip_chunks)}")
+            temp_tuple = tuple(cusip_chunks[i])
+            parm = {'cusip_id': temp_tuple}
+
+            trace = db.raw_sql('''
+                SELECT cusip_id, bond_sym_id, trd_exctn_dt, trd_exctn_tm, days_to_sttl_ct,
+                       lckd_in_ind, wis_fl, sale_cndtn_cd, msg_seq_nb, trc_st,
+                       trd_rpt_dt, trd_rpt_tm, entrd_vol_qt, rptd_pr, yld_pt,
+                       asof_cd, orig_msg_seq_nb, rpt_side_cd, cntra_mp_id
+                FROM trace.trace_enhanced
+                WHERE cusip_id IN %(cusip_id)s
+                  AND cusip_id IS NOT NULL
+                  AND TRIM(cusip_id) != ''
+            ''', params=parm)
+
+            trace.to_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+
+            logging.info(f"Chunk {i}: Retrieved and exported {len(trace)} rows from WRDS")
+            retrieval_elapsed_time = round(time.time() - pull_start_time, 2)
+            logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds")
+    finally:
+        db.close()
 # -------------------------------------------------------------------------
 def clean_trace_data(
     db,
@@ -403,7 +437,8 @@ def clean_trace_data(
     ds_params: dict | None = None,
     bb_params: dict | None = None,
     init_error_params: dict | None = None,
-    filters: dict | None = None
+    filters: dict | None = None,
+    wrds_username: str | None = None,
                     ):
     
     if fetch_fn is None:
@@ -490,41 +525,17 @@ def clean_trace_data(
 
     clean_start_time = time.time()  # Start total timer for cleaning process
 
-    # Pull data and export as parquet files
-    for i in range(0, len(cusip_chunks)):  
-        pull_start_time = time.time()  # Start timer
-        # logging.info(f"Processing chunk {i+1} of {len(cusip_chunks)}")        
-        logging.info(f"Retrieving chunk {i} of {len(cusip_chunks)}")
-        temp_list = cusip_chunks[i]
-        temp_tuple = tuple(temp_list)
-        parm = {'cusip_id': temp_tuple}
-
-        # Load data from WRDS per chunk
-        trace = fetch_fn('''
-            SELECT cusip_id, bond_sym_id, trd_exctn_dt, trd_exctn_tm, days_to_sttl_ct,
-                   lckd_in_ind, wis_fl, sale_cndtn_cd, msg_seq_nb, trc_st,
-                   trd_rpt_dt, trd_rpt_tm, entrd_vol_qt, rptd_pr, yld_pt,
-                   asof_cd, orig_msg_seq_nb, rpt_side_cd, cntra_mp_id
-            FROM trace.trace_enhanced
-            WHERE cusip_id IN %(cusip_id)s
-              AND cusip_id IS NOT NULL
-              AND TRIM(cusip_id) != ''
-        ''', params=parm)
-
-        # Create _data directory if it doesn't exist
-        Path("./_data").mkdir(parents=True, exist_ok=True)
-    
-        # Export DataFrame to Parquet file
-        trace.to_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
-       
-        logging.info(f"Chunk {i}: Retrieved and exported {len(trace)} rows from WRDS")
-
-        # Log initial retrieval time
-        retrieval_elapsed_time = round(time.time() - pull_start_time, 2)
-        logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds")
+    # Start pull process on a separate CPU
+    pull_proc = Process(
+        target=_pull_all_chunks,
+        args=(cusip_chunks, wrds_username),
+    )
+    pull_proc.start()
+    logging.info("Pull process started (PID %s). Waiting 1 minute before processing...", pull_proc.pid)
+    time.sleep(60)  # give pull a 1-minute head start
 
     # Read data from parquet files and process
-    for i in range(0, len(cusip_chunks)):  
+    for i in range(0, len(cusip_chunks)):
         process_start_time = time.time()  # Start timer
         # logging.info(f"Processing chunk {i+1} of {len(cusip_chunks)}")        
         logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
@@ -551,7 +562,14 @@ def clean_trace_data(
         # logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds")
         
         # Read data from Parquet file
-        trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+        try:
+            trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+        
+        # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
+        except FileNotFoundError:
+            logging.warning(f"Parquet file for chunk {i} not found. Retrying in 30 seconds...")
+            time.sleep(30)
+            trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
         
         if len(trace) == 0:
             continue
@@ -861,6 +879,11 @@ def clean_trace_data(
         logging.info(f"Estimated time remaining: {est_time_remaining} minutes")
         logging.info("-" * 50)
             
+    # Ensure pull process has finished before returning
+    pull_proc.join()
+    if pull_proc.exitcode != 0:
+        logging.error("Pull process exited with code %s", pull_proc.exitcode)
+
     if all_super_list:
         final_df = pd.concat(all_super_list, ignore_index=True)
         return final_df, bb_cusips_all, dec_shift_cusips_all, init_price_cusips_all
@@ -1561,8 +1584,6 @@ def filter_by_calendar(
                     
     return df.loc[mask].copy()
 # -------------------------------------------------------------------------
-
-from multiprocessing import Pool
 
 def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
     """
@@ -3245,7 +3266,8 @@ class ProcessEnhancedTRACE:
             ds_params=self.ds_params,
             bb_params=self.bb_params,
             init_error_params=self.init_error_params,
-            filters=self.filters
+            filters=self.filters,
+            wrds_username=self.wrds_username,
         )
 
         # accumulate across all chunks/runs
