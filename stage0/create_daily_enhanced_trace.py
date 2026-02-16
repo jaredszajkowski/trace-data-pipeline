@@ -819,7 +819,9 @@ def clean_trace_data(
 
         # Log elapsed time for the cleaning process
         clean_elapsed_time = round(time.time() - clean_start_time, 2)
-        logging.info(f"Total elapsed time: {clean_elapsed_time/60} minutes")
+        clean_elapsed_time_minutes = clean_elapsed_time / 60
+        logging.info(f"Total elapsed time: {clean_elapsed_time_minutes} minutes")
+        logging.info("-" * 50)
             
     if all_super_list:
         final_df = pd.concat(all_super_list, ignore_index=True)
