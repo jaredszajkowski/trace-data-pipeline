@@ -489,15 +489,16 @@ def clean_trace_data(
                  "trd_rpt_dt","trd_rpt_tm","msg_seq_nb"]
 
     clean_start_time = time.time()  # Start total timer for cleaning process
-    
+
+    # Pull data and export as parquet files
     for i in range(0, len(cusip_chunks)):  
-        start_time = time.time()  # Start timer
+        pull_start_time = time.time()  # Start timer
         # logging.info(f"Processing chunk {i+1} of {len(cusip_chunks)}")        
-        logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
+        logging.info(f"Retrieving chunk {i} of {len(cusip_chunks)}")
         temp_list = cusip_chunks[i]
         temp_tuple = tuple(temp_list)
         parm = {'cusip_id': temp_tuple}
-        
+
         # Load data from WRDS per chunk
         trace = fetch_fn('''
             SELECT cusip_id, bond_sym_id, trd_exctn_dt, trd_exctn_tm, days_to_sttl_ct,
@@ -509,12 +510,48 @@ def clean_trace_data(
               AND cusip_id IS NOT NULL
               AND TRIM(cusip_id) != ''
         ''', params=parm)
+
+        # Create _data directory if it doesn't exist
+        Path("./_data").mkdir(parents=True, exist_ok=True)
+    
+        # Export DataFrame to Parquet file
+        trace.to_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
        
-        logging.info(f"Chunk {i}: Retrieved {len(trace)} rows from WRDS")
+        logging.info(f"Chunk {i}: Retrieved and exported {len(trace)} rows from WRDS")
 
         # Log initial retrieval time
-        retrieval_elapsed_time = round(time.time() - start_time, 2)
+        retrieval_elapsed_time = round(time.time() - pull_start_time, 2)
         logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds")
+
+    # Read data from parquet files and process
+    for i in range(0, len(cusip_chunks)):  
+        process_start_time = time.time()  # Start timer
+        # logging.info(f"Processing chunk {i+1} of {len(cusip_chunks)}")        
+        logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
+        # temp_list = cusip_chunks[i]
+        # temp_tuple = tuple(temp_list)
+        # parm = {'cusip_id': temp_tuple}
+        
+        # # Load data from WRDS per chunk
+        # trace = fetch_fn('''
+        #     SELECT cusip_id, bond_sym_id, trd_exctn_dt, trd_exctn_tm, days_to_sttl_ct,
+        #            lckd_in_ind, wis_fl, sale_cndtn_cd, msg_seq_nb, trc_st,
+        #            trd_rpt_dt, trd_rpt_tm, entrd_vol_qt, rptd_pr, yld_pt,
+        #            asof_cd, orig_msg_seq_nb, rpt_side_cd, cntra_mp_id
+        #     FROM trace.trace_enhanced
+        #     WHERE cusip_id IN %(cusip_id)s
+        #       AND cusip_id IS NOT NULL
+        #       AND TRIM(cusip_id) != ''
+        # ''', params=parm)
+       
+        # logging.info(f"Chunk {i}: Retrieved and exported {len(trace)} rows from WRDS")
+
+        ## Log initial retrieval time
+        # retrieval_elapsed_time = round(time.time() - start_time, 2)
+        # logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds")
+        
+        # Read data from Parquet file
+        trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
         
         if len(trace) == 0:
             continue
@@ -812,7 +849,7 @@ def clean_trace_data(
                 
         all_super_list.append(AllData)
                
-        elapsed_time = round(time.time() - start_time, 2)
+        elapsed_time = round(time.time() - process_start_time, 2)
         # logging.info(f"Chunk {i+1}: took {elapsed_time} seconds")
         logging.info(f"Chunk {i}: took {elapsed_time} seconds")
         logging.info("-" * 50)
