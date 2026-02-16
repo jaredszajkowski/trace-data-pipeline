@@ -820,6 +820,8 @@ def clean_trace_data(
         # Log elapsed time for the cleaning process
         clean_elapsed_time = round((time.time() - clean_start_time) / 60, 2)
         logging.info(f"Total elapsed time: {clean_elapsed_time} minutes")
+        est_time_remaining = round((clean_elapsed_time / (i+1)) * (len(cusip_chunks) - (i+1)), 2)
+        logging.info(f"Estimated time remaining: {est_time_remaining} minutes")
         logging.info("-" * 50)
             
     if all_super_list:
