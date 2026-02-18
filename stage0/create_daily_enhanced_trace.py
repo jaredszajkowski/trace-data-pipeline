@@ -416,7 +416,7 @@ def _pull_all_chunks(cusip_chunks, wrds_username):
             ''', params=parm)
 
             # Export to parquet file
-            trace.to_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+            trace.to_pickle(f"./_data/trace_enhanced_chunk_{i}.pkl")
             logging.info(f"Chunk {i}: Retrieved and exported {len(trace)} rows from WRDS")
             # retrieval_elapsed_time = round(time.time() - pull_start_time, 2)
             # logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds")
@@ -432,17 +432,17 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
         
         # Read data from chunk parquet file
         try:
-            trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+            trace = pd.read_pickle(f"./_data/trace_enhanced_chunk_{i}.pkl")
         
         # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
         except FileNotFoundError:
-            logging.warning(f"Parquet file for chunk {i} not found. Retrying in 10 minutes...")
+            logging.warning(f"Pickle file for chunk {i} not found. Retrying in 10 minutes...")
             time.sleep(600)
-            trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+            trace = pd.read_pickle(f"./_data/trace_enhanced_chunk_{i}.pkl")
         
         # If file is found but empty, export an empty f1 file and skip to next chunk
         if len(trace) == 0:
-            trace.to_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+            trace.to_pickle(f"./_data/trace_enhanced_f1_{i}.pkl")
             logging.info(f"Chunk {i}: Filter 1 complete and exported (empty chunk)")
             continue
               
@@ -472,8 +472,8 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
         # Pre decimal sort #
         trace = trace.sort_values(sort_cols, kind="mergesort", ignore_index=True)
 
-        # Export to parquet file
-        trace.to_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+        # Export to pickle file
+        trace.to_pickle(f"./_data/trace_enhanced_f1_{i}.pkl")
         logging.info(f"Chunk {i}: Filter 1 complete and exported")
 
         # Log filter time
@@ -601,20 +601,20 @@ def clean_trace_data(
     logging.info("Filter 1 cleaning process started (PID %s). Waiting 10 minutes before proceeding...", f1_proc.pid)
     time.sleep(600)  # give f1 cleaning process a 10-minute head start
 
-    # # Read data from parquet files and process
+    # # Read data from pickle files and process
     # for i in range(0, len(cusip_chunks)):
         
     #     logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
         
-    #     # Read data from Parquet file with chunk data
+    #     # Read data from pickle file with chunk data
     #     try:
-    #         trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+    #         trace = pd.read_pickle(f"./_data/trace_enhanced_chunk_{i}.pkl")
         
     #     # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
     #     except FileNotFoundError:
-    #         logging.warning(f"Parquet file for chunk {i} not found. Retrying in 15 seconds...")
+    #         logging.warning(f"Pickle file for chunk {i} not found. Retrying in 15 seconds...")
     #         time.sleep(15)
-    #         trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+    #         trace = pd.read_pickle(f"./_data/trace_enhanced_chunk_{i}.pkl")
         
     #     if len(trace) == 0:
     #         continue
@@ -649,15 +649,15 @@ def clean_trace_data(
     #     filter_elapsed_time = round(time.time() - temp_filter_time, 2)
     #     logging.info(f"Filter took {filter_elapsed_time} seconds")
 
-    # Read data from f1 parquet files and continue with filters
+    # Read data from f1 pickle files and continue with filters
     for i in range(0, len(cusip_chunks)):
-        # Read data from f1 parquet file
+        # Read data from f1 pickle file
         try:
-            trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+            trace = pd.read_pickle(f"./_data/trace_enhanced_f1_{i}.pkl")
         except FileNotFoundError:
-            logging.warning(f"F1 parquet file for chunk {i} not found. Retrying in 10 minutes...")
+            logging.warning(f"F1 pickle file for chunk {i} not found. Retrying in 10 minutes...")
             time.sleep(600)
-            trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+            trace = pd.read_pickle(f"./_data/trace_enhanced_f1_{i}.pkl")
 
         if len(trace) == 0:
             continue
