@@ -8,8 +8,10 @@ This fork modifies the original repository in the following ways:
 
 * Logging for the length of time required for each filter in the `clean_trace_data` function. This logging led to the modifications made to the `multiprocess_clean-pull-f1-f1pre-f1post` branch.
 * The `run_pipeline.sh` script has been modified as follows:
-  1) The disk capacity check has been disabled.
-  2) The "qsub" sections have been removed and replaced with "wait" bash commands for the stage 0 and stage 1 dependencies.
+
+  1. The disk capacity check has been disabled.
+  2. The "qsub" sections have been removed and replaced with "wait" bash commands for the stage 0 and stage 1 dependencies.
+
 * The required `sbatch` file for scheduling on SLURM.
 
 ### `multiprocess_clean-pull-f1-f1pre-f1post` Branch
@@ -18,16 +20,29 @@ This fork modifies the original repository in the following ways:
 * The `_f1_proc` function reads the parquet files from above, runs the initial cleaning and Filter 1: Dick-Nielsen, and exports the resulting `trace` DataFrame as a parquet file, individually for each chunk.
 * Subsequently, the `clean_trace_data` function reads the parquet files from above, and runs the remaining filters.
 * Within the `clean_trace_data` function, multiprocessing is introduced for the pulling of data from WRDS and the Filter 1: Dick-Nielsen, in order to run the processes in parallel. There are 5 CPUs required to take advantage of the multiprocessing, which are allocated as follows:
-  1) Initial execution of `run_pipeline.sh`, then focused on the `clean_trace_data` function.
-  2) `_pull_all_chunks` function (within the `clean_trace_data` function).
-  3) `_f1_proc` function (within the `clean_trace_data` function).
-  4) `clean_post_20120206` function (within the `clean_trace_chunk` function which is within the `_f1_proc` function).
-  5) `clean_pre_20120206` function (within the `clean_trace_chunk` function which is within the `_f1_proc` function).
+
+  1. Initial execution of `run_pipeline.sh`, then focused on the `clean_trace_data` function.
+  2. `_pull_all_chunks` function (within the `clean_trace_data` function).
+  3. `_f1_proc` function (within the `clean_trace_data` function).
+  4. `clean_post_20120206` function (within the `clean_trace_chunk` function which is within the `_f1_proc` function).
+  5. `clean_pre_20120206` function (within the `clean_trace_chunk` function which is within the `_f1_proc` function).
+
 * The `run_pipeline.sh` script has been modified as follows:
-  1) The disk capacity check has been disabled.
-  2) The "qsub" sections have been removed and replaced with "wait" bash commands for the stage 0 and stage 1 dependencies.
+
+  1. The disk capacity check has been disabled.
+  2. The "qsub" sections have been removed and replaced with "wait" bash commands for the stage 0 and stage 1 dependencies.
+
 * The required `sbatch` file for scheduling on SLURM.
 <!-- * Separates the original `run_pipeline.sh` into two scripts: `run_pipeline_stage0_partA.sh` and `run_pipeline_stage0_partB_stage1.sh`, allowing for job dependencies to be set up in the `sbatch` files -->
+
+### Quick Start
+
+Executing the pipeline is as simple as:
+
+1. Login to RCC.
+2. Clone the repository to your home directory.
+3. Create the `.env` file (example provided in `.env.example`).
+4. Navigate to the project directory and run `./submit_trace_pipeline.sh` to submit the job to SLURM and execute the pipeline.
 
 # TRACE Data Pipeline (Original README)
 
