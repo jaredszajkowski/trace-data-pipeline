@@ -217,7 +217,6 @@ def compute_trace_all_metrics(trace):
         'trd_exctn_tm_sec': ['mean', 'last']
     }
 
-    
     results = trace.groupby(['cusip_id', 'trd_exctn_dt']).agg(agg_dict)
     
     # Flatten column names
@@ -400,7 +399,7 @@ def _pull_all_chunks(cusip_chunks, wrds_username):
     try:
         Path("./_data").mkdir(parents=True, exist_ok=True)
         for i in range(len(cusip_chunks)):
-            pull_start_time = time.time()
+            # pull_start_time = time.time()
             logging.info(f"Retrieving chunk {i} of {len(cusip_chunks)}")
             temp_tuple = tuple(cusip_chunks[i])
             parm = {'cusip_id': temp_tuple}
@@ -416,13 +415,67 @@ def _pull_all_chunks(cusip_chunks, wrds_username):
                   AND TRIM(cusip_id) != ''
             ''', params=parm)
 
+            # Export to parquet file
             trace.to_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
-
             logging.info(f"Chunk {i}: Retrieved and exported {len(trace)} rows from WRDS")
-            retrieval_elapsed_time = round(time.time() - pull_start_time, 2)
-            logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds")
+            # retrieval_elapsed_time = round(time.time() - pull_start_time, 2)
+            # logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds")
     finally:
         db.close()
+# -------------------------------------------------------------------------
+def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
+    """Reads parquet files and runs filter 1 cleaning process."""
+    # Read data from parquet files and process
+    for i in range(0, len(cusip_chunks)):
+        
+        logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
+        
+        # Read data from chunk parquet file
+        try:
+            trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+        
+        # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
+        except FileNotFoundError:
+            logging.warning(f"Parquet file for chunk {i} not found. Retrying in 15 seconds...")
+            time.sleep(15)
+            trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+        
+        if len(trace) == 0:
+            continue
+              
+        trace["rptd_pr"] = trace["rptd_pr"].astype("float64").round(6)
+        trace = trace.drop(columns=["index"], errors="ignore").reset_index(drop=True)
+        
+        # Initial log for cleaning
+        log_filter(trace, trace, "start", i)
+        
+        # Filter 1: Dick-Nielsen
+        # temp_filter_time = time.time()  # Start timer for filter
+        if f["dick_nielsen"]:
+            clean_chunk = clean_trace_chunk(
+                trace,
+                chunk_id      = i,
+                clean_agency  = clean_agency,
+                logger        = log_ct_filter
+            )
+            log_filter(trace, clean_chunk, "dick_nielsen_filter", i)
+            trace = clean_chunk.copy()
+            del clean_chunk
+        else:
+            # skip DN cleaner; pass raw chunk through
+            log_filter(trace, trace, "dick_nielsen_filter (skipped)", i)
+        gc.collect()
+               
+        # Pre decimal sort #
+        trace = trace.sort_values(sort_cols, kind="mergesort", ignore_index=True)
+
+        # Export to parquet file
+        trace.to_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+        logging.info(f"Chunk {i}: Filter 1 complete and exported")
+
+        # Log filter time
+        # filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        # logging.info(f"Filter took {filter_elapsed_time} seconds")
 # -------------------------------------------------------------------------
 def clean_trace_data(
     db,
@@ -531,81 +584,80 @@ def clean_trace_data(
         args=(cusip_chunks, wrds_username),
     )
     pull_proc.start()
-    logging.info("Pull process started (PID %s). Waiting 15 seconds before processing...", pull_proc.pid)
+    logging.info("Pull process started (PID %s). Waiting 15 seconds before proceeding...", pull_proc.pid)
     time.sleep(15)  # give pull a 15-second head start
 
-    # Read data from parquet files and process
-    for i in range(0, len(cusip_chunks)):
-        process_start_time = time.time()  # Start timer
-        # logging.info(f"Processing chunk {i+1} of {len(cusip_chunks)}")        
-        logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
-        # temp_list = cusip_chunks[i]
-        # temp_tuple = tuple(temp_list)
-        # parm = {'cusip_id': temp_tuple}
-        
-        # # Load data from WRDS per chunk
-        # trace = fetch_fn('''
-        #     SELECT cusip_id, bond_sym_id, trd_exctn_dt, trd_exctn_tm, days_to_sttl_ct,
-        #            lckd_in_ind, wis_fl, sale_cndtn_cd, msg_seq_nb, trc_st,
-        #            trd_rpt_dt, trd_rpt_tm, entrd_vol_qt, rptd_pr, yld_pt,
-        #            asof_cd, orig_msg_seq_nb, rpt_side_cd, cntra_mp_id
-        #     FROM trace.trace_enhanced
-        #     WHERE cusip_id IN %(cusip_id)s
-        #       AND cusip_id IS NOT NULL
-        #       AND TRIM(cusip_id) != ''
-        # ''', params=parm)
-       
-        # logging.info(f"Chunk {i}: Retrieved and exported {len(trace)} rows from WRDS")
+    # process_start_time = time.time()  # Start timer for clean process
 
-        ## Log initial retrieval time
-        # retrieval_elapsed_time = round(time.time() - start_time, 2)
-        # logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds")
+    # Start filter 1 cleaning process on separate CPU
+    f1_proc = Process(
+        target=_f1_proc,
+        args=(cusip_chunks, f, clean_agency, sort_cols),
+    )
+    f1_proc.start()
+    logging.info("Filter 1 cleaning process started (PID %s). Waiting 15 seconds before proceeding...", f1_proc.pid)
+    time.sleep(15)  # give f1 cleaning process a 15-second head start
+
+    # # Read data from parquet files and process
+    # for i in range(0, len(cusip_chunks)):
         
-        # Read data from Parquet file
-        try:
-            trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+    #     logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
         
-        # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
-        except FileNotFoundError:
-            logging.warning(f"Parquet file for chunk {i} not found. Retrying in 30 seconds...")
-            time.sleep(30)
-            trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+    #     # Read data from Parquet file with chunk data
+    #     try:
+    #         trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
         
-        if len(trace) == 0:
-            continue
+    #     # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
+    #     except FileNotFoundError:
+    #         logging.warning(f"Parquet file for chunk {i} not found. Retrying in 15 seconds...")
+    #         time.sleep(15)
+    #         trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+        
+    #     if len(trace) == 0:
+    #         continue
               
-        trace["rptd_pr"] = trace["rptd_pr"].astype("float64").round(6)
-        trace = trace.drop(columns=["index"], errors="ignore").reset_index(drop=True)
+    #     trace["rptd_pr"] = trace["rptd_pr"].astype("float64").round(6)
+    #     trace = trace.drop(columns=["index"], errors="ignore").reset_index(drop=True)
         
-        # Initial log for cleaning
-        log_filter(trace, trace, "start", i)
+    #     # Initial log for cleaning
+    #     log_filter(trace, trace, "start", i)
         
-        # Filter 1: Dick-Nielsen
-        temp_filter_time = time.time()  # Start timer for filter
-        if f["dick_nielsen"]:
-            clean_chunk = clean_trace_chunk(
-                trace,
-                chunk_id      = i,
-                clean_agency  = clean_agency,
-                logger        = log_ct_filter
-            )
-            log_filter(trace, clean_chunk, "dick_nielsen_filter", i)
-            trace = clean_chunk.copy()
-            del clean_chunk
-        else:
-            # skip DN cleaner; pass raw chunk through
-            log_filter(trace, trace, "dick_nielsen_filter (skipped)", i)
-        gc.collect()
+    #     # Filter 1: Dick-Nielsen
+    #     temp_filter_time = time.time()  # Start timer for filter
+    #     if f["dick_nielsen"]:
+    #         clean_chunk = clean_trace_chunk(
+    #             trace,
+    #             chunk_id      = i,
+    #             clean_agency  = clean_agency,
+    #             logger        = log_ct_filter
+    #         )
+    #         log_filter(trace, clean_chunk, "dick_nielsen_filter", i)
+    #         trace = clean_chunk.copy()
+    #         del clean_chunk
+    #     else:
+    #         # skip DN cleaner; pass raw chunk through
+    #         log_filter(trace, trace, "dick_nielsen_filter (skipped)", i)
+    #     gc.collect()
                
-        # Pre decimal sort #
-        trace = trace.sort_values(sort_cols, kind="mergesort", ignore_index=True)
+    #     # Pre decimal sort #
+    #     trace = trace.sort_values(sort_cols, kind="mergesort", ignore_index=True)
 
-        # Log filter time
-        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
-        logging.info(f"Filter took {filter_elapsed_time} seconds")
+    #     # Log filter time
+    #     filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+    #     logging.info(f"Filter took {filter_elapsed_time} seconds")
+
+    # Read data from f1 parquet files and continue with filters
+    for i in range(0, len(cusip_chunks)):
+        # Read data from f1 parquet file
+        try:
+            trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+        except FileNotFoundError:
+            logging.warning(f"F1 parquet file for chunk {i} not found. Retrying in 15 seconds...")
+            time.sleep(15)
+            trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
        
         # Filter 2: Decimal Correction
-        temp_filter_time = time.time()  # Start timer for filter
+        # temp_filter_time = time.time()  # Start timer for filter
         if f["decimal_shift_corrector"]:
             _ds_defaults = dict(
                 id_col="cusip_id",
@@ -639,11 +691,11 @@ def clean_trace_data(
         gc.collect()
 
         # Log filter time
-        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
-        logging.info(f"Filter took {filter_elapsed_time} seconds")
+        # filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        # logging.info(f"Filter took {filter_elapsed_time} seconds")
                        
         # Filter 3: Trading Time                
-        temp_filter_time = time.time()  # Start timer for filter
+        # temp_filter_time = time.time()  # Start timer for filter
         if f["trading_time"]:
             before_time = trace
             trace = filter_by_trade_time(
@@ -659,11 +711,11 @@ def clean_trace_data(
             log_filter(trace, trace, "trading_time_filter (skipped)", i)
 
         # Log filter time
-        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
-        logging.info(f"Filter took {filter_elapsed_time} seconds")
+        # filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        # logging.info(f"Filter took {filter_elapsed_time} seconds")
 
         # Filter 4: Trading Calendar
-        temp_filter_time = time.time()  # Start timer for filter
+        # temp_filter_time = time.time()  # Start timer for filter
         if f["trading_calendar"]:
             before_calr = trace
             trace = filter_by_calendar(
@@ -681,11 +733,11 @@ def clean_trace_data(
             log_filter(trace, trace, "calendar_filter (skipped)", i)
 
         # Log filter time
-        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
-        logging.info(f"Filter took {filter_elapsed_time} seconds")
+        # filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        # logging.info(f"Filter took {filter_elapsed_time} seconds")
         
         # Filter 5: Prices
-        temp_filter_time = time.time()  # Start timer for filter
+        # temp_filter_time = time.time()  # Start timer for filter
         if f["price_filters"]:
             trace = filter_with_log(trace, trace['rptd_pr'] > 0,     "neg_price_filter",   i)
             trace = filter_with_log(trace, trace['rptd_pr'] <= 1000, "large_price_filter", i)
@@ -694,11 +746,11 @@ def clean_trace_data(
             log_filter(trace, trace, "large_price_filter (skipped)", i)
 
         # Log filter time
-        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
-        logging.info(f"Filter took {filter_elapsed_time} seconds")
+        # filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        # logging.info(f"Filter took {filter_elapsed_time} seconds")
 
         # Filter 6: Trading Volume
-        temp_filter_time = time.time()  # Start timer for filter
+        # temp_filter_time = time.time()  # Start timer for filter
         # Compute dollar volume
         # entrd_vol_qt is in DOLLARS
         # https://wrds-www.wharton.upenn.edu/documents/1241/TRACE_Enhanced_Corporate_and_Agency_Historic_Data_File_Layout_post_2_6_12_10252024v.pdf
@@ -725,11 +777,11 @@ def clean_trace_data(
         trace = trace.sort_values(sort_cols, kind="mergesort", ignore_index=True)
 
         # Log filter time
-        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
-        logging.info(f"Filter took {filter_elapsed_time} seconds")
+        # filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        # logging.info(f"Filter took {filter_elapsed_time} seconds")
         
         # Filter 7: Bounce-Back
-        temp_filter_time = time.time()  # Start timer for filter
+        # temp_filter_time = time.time()  # Start timer for filter
         if f["bounce_back_filter"]:            
             _bb_defaults = dict(
                 id_col="cusip_id",
@@ -772,11 +824,11 @@ def clean_trace_data(
         gc.collect()
 
         # Log filter time        
-        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
-        logging.info(f"Filter took {filter_elapsed_time} seconds")  
+        # filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        # logging.info(f"Filter took {filter_elapsed_time} seconds")  
                         
         # Filter 8: Yield != Price
-        temp_filter_time = time.time()  # Start timer for filter
+        # temp_filter_time = time.time()  # Start timer for filter
         if f["yld_price_filter"]:
             mask = (trace["rptd_pr"] != trace["yld_pt"]) | trace["yld_pt"].isna()
             trace = filter_with_log(trace, mask, "price_yld_filter", i)
@@ -784,11 +836,11 @@ def clean_trace_data(
             log_filter(trace, trace, "price_yld_filter (skipped)", i)
 
         # Log filter time
-        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
-        logging.info(f"Filter took {filter_elapsed_time} seconds")
+        # filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        # logging.info(f"Filter took {filter_elapsed_time} seconds")
 
         # Filter 9: Amount-outstanding vs. volume filter
-        temp_filter_time = time.time()  # Start timer for filter
+        # temp_filter_time = time.time()  # Start timer for filter
         trace = trace.merge(fisd_off, how="left", left_on='cusip_id', right_on='cusip_id')
         if f["amtout_volume_filter"]:
             trace = filter_with_log(
@@ -801,11 +853,11 @@ def clean_trace_data(
             log_filter(trace, trace, "volume_offamt_filter (skipped)", i)
 
         # Log filter time
-        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
-        logging.info(f"Filter took {filter_elapsed_time} seconds")
+        # filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        # logging.info(f"Filter took {filter_elapsed_time} seconds")
 
         # Filter 10: Execution date cannot exceed maturity
-        temp_filter_time = time.time()  # Start timer for filter
+        # temp_filter_time = time.time()  # Start timer for filter
         if f["trd_exe_mat_filter"]:
             trace = filter_with_log(
                 trace,
@@ -817,11 +869,11 @@ def clean_trace_data(
             log_filter(trace, trace, "exctn_mat_dt_filter (skipped)", i)
 
         # Log filter time
-        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
-        logging.info(f"Filter took {filter_elapsed_time} seconds")
+        # filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        # logging.info(f"Filter took {filter_elapsed_time} seconds")
 
         # Filter 11: Initial Price Errors
-        temp_filter_time = time.time()  # Start timer for filter
+        # temp_filter_time = time.time()  # Start timer for filter
         if f["flag_initial_price_errors"]:
             _ie_defaults = dict(
                 id_col="cusip_id",
@@ -849,8 +901,8 @@ def clean_trace_data(
         gc.collect()
 
         # Log filter time
-        filter_elapsed_time = round(time.time() - temp_filter_time, 2)
-        logging.info(f"Filter took {filter_elapsed_time} seconds")
+        # filter_elapsed_time = round(time.time() - temp_filter_time, 2)
+        # logging.info(f"Filter took {filter_elapsed_time} seconds")
 
         #* ************************************** */
         #* DAILY AGGREGATION                      */
@@ -867,22 +919,25 @@ def clean_trace_data(
                 
         all_super_list.append(AllData)
                
-        elapsed_time = round(time.time() - process_start_time, 2)
+        # elapsed_time = round(time.time() - process_start_time, 2)
         # logging.info(f"Chunk {i+1}: took {elapsed_time} seconds")
-        logging.info(f"Chunk {i}: took {elapsed_time} seconds")
+        # logging.info(f"Chunk {i}: took {elapsed_time} seconds")
         logging.info("-" * 50)
 
         # Log elapsed time for the cleaning process
         clean_elapsed_time = round((time.time() - clean_start_time) / 60, 2)
         logging.info(f"Total elapsed time: {clean_elapsed_time} minutes")
-        est_time_remaining = round((clean_elapsed_time / (i+1)) * (len(cusip_chunks) - (i+1)), 2)
-        logging.info(f"Estimated time remaining: {est_time_remaining} minutes")
+        # est_time_remaining = round((clean_elapsed_time / (i+1)) * (len(cusip_chunks) - (i+1)), 2)
+        # logging.info(f"Estimated time remaining: {est_time_remaining} minutes")
         logging.info("-" * 50)
             
-    # Ensure pull process has finished before returning
+    # Ensure pull and f1 processes have finished before returning
     pull_proc.join()
     if pull_proc.exitcode != 0:
         logging.error("Pull process exited with code %s", pull_proc.exitcode)
+    f1_proc.join()
+    if f1_proc.exitcode != 0:
+        logging.error("Filter 1 process exited with code %s", f1_proc.exitcode)
 
     if all_super_list:
         final_df = pd.concat(all_super_list, ignore_index=True)
@@ -1587,101 +1642,58 @@ def filter_by_calendar(
                     
     return df.loc[mask].copy()
 # -------------------------------------------------------------------------
-
-# At module level (top of file) - computed ONCE, not every chunk
-CUTOFF_DATE = pd.Timestamp('2012-02-06')
-
 def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
+    """
+    [Original docstring stays the same]
+    """
 
-    # Convert dates once
+    # Convert date strings to datetime objects
+    cutoff_date = pd.to_datetime('2012-02-06')
+    
     trace['trd_exctn_dt'] = pd.to_datetime(trace['trd_exctn_dt'])
     trace['trd_rpt_dt'] = pd.to_datetime(trace['trd_rpt_dt'])
-
-    # Split into pre/post
-    post_mask = trace['trd_rpt_dt'] >= CUTOFF_DATE
-    post = trace[post_mask].copy()
-    pre = trace[~post_mask].copy()
-
-    # Apply all pre-filters in one combined mask (avoid repeated filtering)
+        
+    # Split data into pre and post 2012/02/06 based on reporting date
+    post = trace[trace['trd_rpt_dt'] >= cutoff_date].copy()
+    pre  = trace[trace['trd_rpt_dt'] < cutoff_date].copy()
+    
+    # Apply additional filters for pre-2012-02-06 data
     if not pre.empty:
-        # Convert all columns at once
-        for col in ['days_to_sttl_ct', 'wis_fl', 'lckd_in_ind', 'sale_cndtn_cd']:
-            pre[col] = pre[col].astype(str).replace('nan', 'None')
-
-        # Apply ALL filters in a single mask instead of 4 separate passes
-        mask = (
-            pre['days_to_sttl_ct'].isin({'000', '001', '002', 'None'}) &
-            (pre['wis_fl'] != 'Y') &
-            (pre['lckd_in_ind'] != 'Y') &
-            pre['sale_cndtn_cd'].isin({'None', '@'})
-        )
-
+        # Convert indicators to string
+        pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].astype(str)
+        pre['wis_fl'] = pre['wis_fl'].astype(str)
+        pre['lckd_in_ind'] = pre['lckd_in_ind'].astype(str)
+        pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].astype(str)
+        
+        # Replace NaN strings with 'None'
+        pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].replace('nan', 'None')
+        pre['wis_fl'] = pre['wis_fl'].replace('nan', 'None')
+        pre['lckd_in_ind'] = pre['lckd_in_ind'].replace('nan', 'None')
+        pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].replace('nan', 'None')
+        
+        # 1) <= 2-day settlement ---------------------------------------------
+        before = pre
+        pre = pre[pre['days_to_sttl_ct'].isin({'000','001','002','None'})]
         if logger:
-            before = pre
-            pre_settle    = pre[pre['days_to_sttl_ct'].isin({'000','001','002','None'})]
-            pre_wis       = pre_settle[pre_settle['wis_fl'] != 'Y']
-            pre_locked    = pre_wis[pre_wis['lckd_in_ind'] != 'Y']
-            pre_final     = pre_locked[pre_locked['sale_cndtn_cd'].isin({'None','@'})]
-            logger(before,     pre_settle, "pre_settle_<=2d",        chunk_id)
-            logger(pre_settle, pre_wis,    "pre_exclude_WIS",        chunk_id)
-            logger(pre_wis,    pre_locked, "pre_exclude_locked_in",  chunk_id)
-            logger(pre_locked, pre_final,  "pre_exclude_special_cond", chunk_id)
-            pre = pre_final
-        else:
-            pre = pre[mask]
-
-# def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
-#     """
-#     [Original docstring stays the same]
-#     """
-
-#     # Convert date strings to datetime objects
-#     cutoff_date = pd.to_datetime('2012-02-06')
+            logger(before, pre, "pre_settle_<=2d", chunk_id)
     
-#     trace['trd_exctn_dt'] = pd.to_datetime(trace['trd_exctn_dt'])
-#     trace['trd_rpt_dt'] = pd.to_datetime(trace['trd_rpt_dt'])
-        
-#     # Split data into pre and post 2012/02/06 based on reporting date
-#     post = trace[trace['trd_rpt_dt'] >= cutoff_date].copy()
-#     pre  = trace[trace['trd_rpt_dt'] < cutoff_date].copy()
+        # 2) Exclude when-issued (wis_fl == 'Y') -----------------------------
+        before = pre
+        pre = pre[pre['wis_fl'] != 'Y']
+        if logger:
+            logger(before, pre, "pre_exclude_WIS", chunk_id)
     
-#     # Apply additional filters for pre-2012-02-06 data
-#     if not pre.empty:
-#         # Convert indicators to string
-#         pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].astype(str)
-#         pre['wis_fl'] = pre['wis_fl'].astype(str)
-#         pre['lckd_in_ind'] = pre['lckd_in_ind'].astype(str)
-#         pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].astype(str)
-        
-#         # Replace NaN strings with 'None'
-#         pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].replace('nan', 'None')
-#         pre['wis_fl'] = pre['wis_fl'].replace('nan', 'None')
-#         pre['lckd_in_ind'] = pre['lckd_in_ind'].replace('nan', 'None')
-#         pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].replace('nan', 'None')
-        
-#         # 1) <= 2-day settlement ---------------------------------------------
-#         before = pre
-#         pre = pre[pre['days_to_sttl_ct'].isin({'000','001','002','None'})]
-#         if logger:
-#             logger(before, pre, "pre_settle_<=2d", chunk_id)
+        # 3) Exclude locked-in (lckd_in_ind == 'Y') -------------------------
+        before = pre
+        pre = pre[pre['lckd_in_ind'] != 'Y']
+        if logger:
+            logger(before, pre, "pre_exclude_locked_in", chunk_id)
     
-#         # 2) Exclude when-issued (wis_fl == 'Y') -----------------------------
-#         before = pre
-#         pre = pre[pre['wis_fl'] != 'Y']
-#         if logger:
-#             logger(before, pre, "pre_exclude_WIS", chunk_id)
-    
-#         # 3) Exclude locked-in (lckd_in_ind == 'Y') -------------------------
-#         before = pre
-#         pre = pre[pre['lckd_in_ind'] != 'Y']
-#         if logger:
-#             logger(before, pre, "pre_exclude_locked_in", chunk_id)
-    
-#         # 4) Exclude special conditions (sale_cndtn_cd not in {None, @}) ----
-#         before = pre
-#         pre = pre[pre['sale_cndtn_cd'].isin({'None','@'})]
-#         if logger:
-#             logger(before, pre, "pre_exclude_special_cond", chunk_id)
+        # 4) Exclude special conditions (sale_cndtn_cd not in {None, @}) ----
+        before = pre
+        pre = pre[pre['sale_cndtn_cd'].isin({'None','@'})]
+        if logger:
+            logger(before, pre, "pre_exclude_special_cond", chunk_id)
     
     # ========================================
     # PARALLEL: Clean pre and post simultaneously
@@ -1718,701 +1730,217 @@ def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
         clean_final = clean_combined  
     
     return clean_final
-
-# def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
-#     """
-#     Clean one chunk of Enhanced TRACE trades and returns a filtered DataFrame.
-#     This routine applies date cutoffs, status and condition filters, duplicate
-#     handling, and optional agency de-duplication. It is designed to be called
-#     inside a loop over CUSIP chunks prior to any decimal-shift or bounce-back
-#     logic.
-
-#     What it does
-#     ------------
-#     - Ensures datetime types for report and execution timestamps.
-#     - Drops rows with missing or empty cusip_id.
-#     - Splits the data at the regulatory change on 2012-02-06:
-#       * pre segment: applies legacy filters and explicit cancel and correction handling.
-#       * post segment: applies the updated filters using the newer status fields.
-#     - Reconciles cancels and corrections within the pre segment using key-based matching.
-#     - Optionally removes agency duplicate prints if clean_agency is True.
-#     - Re-combines pre and post segments and returns the cleaned result.
-
-#     Parameters
-#     ----------
-#     trace : pandas.DataFrame
-#         Raw Enhanced TRACE rows for a set of CUSIPs. Expected columns follow the
-#         standard TRACE schema, for example:
-#         cusip_id, trd_exctn_dt, trd_exctn_tm, trd_rpt_dt, trd_rpt_tm,
-#         msg_seq_nb, orig_msg_seq_nb, trc_st, asof_cd, sale_cndtn_cd,
-#         lckd_in_ind, wis_fl, rpt_side_cd, entrd_vol_qt, rptd_pr, yld_pt.
-#         Additional columns are passed through unchanged.
-#     chunk_id : int or None, optional
-#         Identifier used in logs and audit trails for this chunk.
-#     clean_agency : bool, default True
-#         If True, apply the agency de-duplication pass at the end.
-#     logger : callable or None, optional
-#         Function used to append one audit row per stage. It will be called as:
-#             logger(df_before, df_after, stage="stage_name", chunk_id=chunk_id)
-#         Suggested stage names include:
-#             "base_filters", "pre_rules", "post_rules",
-#             "cancels_corrections", "agency_cleaning".
-
-#     Returns
-#     -------
-#     pandas.DataFrame
-#         Cleaned TRACE rows for the input chunk. The return is a new DataFrame
-#         and the input is not modified in place.
-
-#     Notes
-#     -----
-#     - Sorting and index are not guaranteed; callers commonly re-sort by
-#       cusip_id, trd_exctn_dt, trd_exctn_tm after downstream merges.
-#     - If the input is empty, an empty DataFrame is returned.
-#     - The exact list of filters mirrors the commonly used academic cleaning
-#       conventions around the 2012-02-06 transition date.
-#     """
-
-#     # Convert date strings to datetime objects
-#     cutoff_date = pd.to_datetime('2012-02-06')
-    
-#     trace['trd_exctn_dt'] = pd.to_datetime(trace['trd_exctn_dt'])
-#     trace['trd_rpt_dt'] = pd.to_datetime(trace['trd_rpt_dt'])
-        
-#     # Split data into pre and post 2012/02/06 based on reporting date
-#     post = trace[trace['trd_rpt_dt'] >= cutoff_date].copy()
-#     pre  = trace[trace['trd_rpt_dt'] < cutoff_date].copy()
-    
-#     # Apply additional filters for pre-2012-02-06 data
-#     if not pre.empty:
-#         # Convert indicators to string
-#         pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].astype(str)
-#         pre['wis_fl'] = pre['wis_fl'].astype(str)
-#         pre['lckd_in_ind'] = pre['lckd_in_ind'].astype(str)
-#         pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].astype(str)
-        
-#         # Replace NaN strings with 'None'
-#         pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].replace('nan', 'None')
-#         pre['wis_fl'] = pre['wis_fl'].replace('nan', 'None')
-#         pre['lckd_in_ind'] = pre['lckd_in_ind'].replace('nan', 'None')
-#         pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].replace('nan', 'None')
-        
-#         # 1) <= 2-day settlement ---------------------------------------------
-#         before = pre
-#         pre = pre[pre['days_to_sttl_ct'].isin({'000','001','002','None'})]
-#         if logger:
-#             logger(before, pre, "pre_settle_<=2d", chunk_id)
-    
-#         # 2) Exclude when-issued (wis_fl == 'Y') -----------------------------
-#         before = pre
-#         pre = pre[pre['wis_fl'] != 'Y']
-#         if logger:
-#             logger(before, pre, "pre_exclude_WIS", chunk_id)
-    
-#         # 3) Exclude locked-in (lckd_in_ind == 'Y') -------------------------
-#         before = pre
-#         pre = pre[pre['lckd_in_ind'] != 'Y']
-#         if logger:
-#             logger(before, pre, "pre_exclude_locked_in", chunk_id)
-    
-#         # 4) Exclude special conditions (sale_cndtn_cd not in {None, @}) ----
-#         before = pre
-#         pre = pre[pre['sale_cndtn_cd'].isin({'None','@'})]
-#         if logger:
-#             logger(before, pre, "pre_exclude_special_cond", chunk_id)
-    
-#     # Clean Post 2012/02/06 data
-#     clean_post = clean_post_20120206(post,
-#       chunk_id=chunk_id,logger=log_ct_filter) if not post.empty else pd.DataFrame()
-#     # 38628-37057
-#     # Clean Pre 2012/02/06 data
-#     clean_pre = clean_pre_20120206(pre,
-#       chunk_id=chunk_id,logger=log_ct_filter ) if not pre.empty else pd.DataFrame()
-    
-#     # Combine pre and post data
-#     clean_combined = pd.concat([clean_pre, clean_post], ignore_index=True)
-    
-#     # Apply agency transaction cleaning conditionally
-#     if clean_agency:
-#         clean_final = clean_agency_transactions(clean_combined) if not clean_combined.empty else pd.DataFrame()
-#         if logger:
-#             logger(clean_combined, clean_final,
-#                    stage="agency_cleaning", chunk_id=chunk_id)      
-#     else:
-#         clean_final = clean_combined  
-    
-#     return clean_final
 # -------------------------------------------------------------------------
-# def clean_post_20120206(post, chunk_id=None, logger=None):
-#     """
-#     Clean Enhanced TRACE data reported on or after February 6, 2012.
-    
-#     Removes cancellations (C, X), corrections, and reversals (Y) from post-2012 
-#     TRACE Enhanced data using the updated regulatory reporting structure. This 
-#     function implements the two-stage cleaning procedure described in 
-#     Dick-Nielsen (2009, 2014) for the modern TRACE reporting system.
-    
-#     Regulatory Context
-#     ------------------
-#     On February 6, 2012, FINRA updated the TRACE reporting system with new 
-#     status codes:
-#     - 'T': Trade Report (original transaction)
-#     - 'R': Trade Report (used with reversals in some contexts)
-#     - 'X', 'C': Cancellation and Correction (same MSG_SEQ_NB as original)
-#     - 'Y': Reversal (ORIG_MSG_SEQ_NB points to original trade's MSG_SEQ_NB)
-    
-#     Cleaning Procedure
-#     ------------------
-#     **Step 1: Remove Cancellations and Corrections (C, X)**
-#     Matches using 8 keys:
-#         - cusip_id, trd_exctn_dt, trd_exctn_tm, rptd_pr, entrd_vol_qt
-#         - rpt_side_cd, cntra_mp_id, msg_seq_nb
-    
-#     Key insight: C and X records show the SAME msg_seq_nb as the original 
-#     trade they cancel or correct. Matched T/R records are removed.
-    
-#     **Step 2: Remove Reversals (Y)**
-#     Matches using 7 keys + asymmetric msg_seq_nb:
-#         - cusip_id, trd_exctn_dt, trd_exctn_tm, rptd_pr, entrd_vol_qt
-#         - rpt_side_cd, cntra_mp_id
-#         - clean_post1.msg_seq_nb = post_Y.orig_msg_seq_nb (asymmetric)
-    
-#     Key insight: Y records contain orig_msg_seq_nb pointing to the original 
-#     trade's msg_seq_nb. This creates an asymmetric join condition. Matched 
-#     T/R records are removed.
-    
-#     Parameters
-#     ----------
-#     post : pandas.DataFrame
-#         Enhanced TRACE records with trd_rpt_dt >= '2012-02-06'. Must contain:
-#         - cusip_id : str
-#             CUSIP identifier
-#         - trd_exctn_dt : datetime
-#             Trade execution date
-#         - trd_exctn_tm : str or time
-#             Trade execution time
-#         - trd_rpt_dt : datetime
-#             Trade report date (used for date filtering upstream)
-#         - rptd_pr : float
-#             Reported price
-#         - entrd_vol_qt : float or int
-#             Entered volume quantity
-#         - rpt_side_cd : str
-#             Reporting side code ('B' or 'S')
-#         - cntra_mp_id : str
-#             Contra-party market participant ID ('C' or 'D')
-#         - msg_seq_nb : str or int
-#             Message sequence number (unique trade identifier)
-#         - orig_msg_seq_nb : str or int
-#             Original message sequence number (for Y reversals)
-#         - trc_st : str
-#             Transaction status ('T', 'R', 'X', 'C', 'Y')
-                   
-#     Returns
-#     -------
-#     pandas.DataFrame
-#         Cleaned dataset with cancellations, corrections, and reversals removed.
-#         Contains only valid trade reports (T/R records that were not matched
-#         to any C/X/Y records). Empty DataFrame returned if input is empty.
-        
-#         The returned DataFrame:
-#         - Preserves all columns from the input
-#         - May have fewer rows due to cancellation/reversal removal
-#         - Is not sorted (downstream code should sort as needed)
-#         - Has reset index (ignore_index=True used in operations)        
-#     """
-    
-#     if post.empty:
-#         return pd.DataFrame()
-    
-#     # Store original for logging
-#     original_post = post['cusip_id'].copy()
-    
-#     # Split data based on trc_st
-#     post_TR = post[post['trc_st'].isin(['T', 'R'])].copy()
-#     post_XC = post[post['trc_st'].isin(['X', 'C'])].copy()
-#     post_Y  = post[post['trc_st'] == 'Y'].copy()
-        
-#     # Step 1.1: Remove Cancellation and Correction
-#     # Match Cancellation and Correction using 7 keys + msg_seq_nb:
-#     # cusip_id, Execution Date and Time, Quantity, Price, Buy/Sell Indicator, 
-#     # Contra Party, msg_seq_nb
-#     # C and X records show the same MSG_SEQ_NB as the original record
-#     if not post_XC.empty and not post_TR.empty:
-#         # Create a merge key for matching
-#         post_TR['merge_key'] = (post_TR['cusip_id'] + '_' + 
-#                                 post_TR['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
-#                                 post_TR['trd_exctn_tm'].astype(str) + '_' + 
-#                                 post_TR['rptd_pr'].astype(str) + '_' +
-#                                 post_TR['entrd_vol_qt'].astype(str) + '_' + 
-#                                 post_TR['rpt_side_cd'] + '_' +
-#                                 post_TR['cntra_mp_id'] + '_' + 
-#                                 post_TR['msg_seq_nb'].astype(str))
-        
-#         post_XC['merge_key'] = (post_XC['cusip_id'] + '_' + 
-#                                 post_XC['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
-#                                 post_XC['trd_exctn_tm'].astype(str) + '_' + 
-#                                 post_XC['rptd_pr'].astype(str) + '_' +
-#                                 post_XC['entrd_vol_qt'].astype(str) + '_' + 
-#                                 post_XC['rpt_side_cd'] + '_' +
-#                                 post_XC['cntra_mp_id'] + '_' + 
-#                                 post_XC['msg_seq_nb'].astype(str))
-        
-#         # Keep records that don't have matches in post_XC
-#         clean_post1 = post_TR[~post_TR['merge_key'].isin(post_XC['merge_key'])].copy()
-#         clean_post1.drop(columns=['merge_key'], inplace=True)
-#     else:
-#         clean_post1 = post_TR.copy()
-    
-#     if logger:              
-#         logger(original_post, clean_post1, "post_cancel_corr", chunk_id)
-        
-#     # Step 1.2: Remove Reversals
-#     # Match Reversal using the same 7 keys but:
-#     # - Use msg_seq_nb from clean_post1
-#     # - Use orig_msg_seq_nb from post_Y (not msg_seq_nb!)
-#     if not post_Y.empty and not clean_post1.empty:
-#         # Create merge keys 
-#         # For clean_post1: use msg_seq_nb
-#         clean_post1['merge_key'] = (clean_post1['cusip_id'] + '_' + 
-#                                     clean_post1['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
-#                                     clean_post1['trd_exctn_tm'].astype(str) + '_' + 
-#                                     clean_post1['rptd_pr'].astype(str) + '_' +
-#                                     clean_post1['entrd_vol_qt'].astype(str) + '_' + 
-#                                     clean_post1['rpt_side_cd'] + '_' +
-#                                     clean_post1['cntra_mp_id'] + '_' + 
-#                                     clean_post1['msg_seq_nb'].astype(str))  # <-- msg_seq_nb
-        
-#         # For post_Y: use orig_msg_seq_nb (not msg_seq_nb!)
-#         post_Y['merge_key'] = (post_Y['cusip_id'] + '_' + 
-#                                post_Y['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
-#                                post_Y['trd_exctn_tm'].astype(str) + '_' + 
-#                                post_Y['rptd_pr'].astype(str) + '_' +
-#                                post_Y['entrd_vol_qt'].astype(str) + '_' + 
-#                                post_Y['rpt_side_cd'] + '_' +
-#                                post_Y['cntra_mp_id'] + '_' + 
-#                                post_Y['orig_msg_seq_nb'].astype(str))  # <-- orig_msg_seq_nb!
-        
-#         # Keep records that don't have matches in post_Y
-#         clean_post2 = clean_post1[~clean_post1['merge_key'].isin(post_Y['merge_key'])].copy()
-#         clean_post2.drop(columns=['merge_key'], inplace=True)
-#     else:
-#         clean_post2 = clean_post1.copy()
-        
-#     if logger:              
-#         logger(clean_post1, clean_post2, "post_reversals", chunk_id)
-    
-#     return clean_post2
-
 def clean_post_20120206(post, chunk_id=None, logger=None):
+    """
+    Clean Enhanced TRACE data reported on or after February 6, 2012.
+    
+    Removes cancellations (C, X), corrections, and reversals (Y) from post-2012 
+    TRACE Enhanced data using the updated regulatory reporting structure. This 
+    function implements the two-stage cleaning procedure described in 
+    Dick-Nielsen (2009, 2014) for the modern TRACE reporting system.
+    
+    Regulatory Context
+    ------------------
+    On February 6, 2012, FINRA updated the TRACE reporting system with new 
+    status codes:
+    - 'T': Trade Report (original transaction)
+    - 'R': Trade Report (used with reversals in some contexts)
+    - 'X', 'C': Cancellation and Correction (same MSG_SEQ_NB as original)
+    - 'Y': Reversal (ORIG_MSG_SEQ_NB points to original trade's MSG_SEQ_NB)
+    
+    Cleaning Procedure
+    ------------------
+    **Step 1: Remove Cancellations and Corrections (C, X)**
+    Matches using 8 keys:
+        - cusip_id, trd_exctn_dt, trd_exctn_tm, rptd_pr, entrd_vol_qt
+        - rpt_side_cd, cntra_mp_id, msg_seq_nb
+    
+    Key insight: C and X records show the SAME msg_seq_nb as the original 
+    trade they cancel or correct. Matched T/R records are removed.
+    
+    **Step 2: Remove Reversals (Y)**
+    Matches using 7 keys + asymmetric msg_seq_nb:
+        - cusip_id, trd_exctn_dt, trd_exctn_tm, rptd_pr, entrd_vol_qt
+        - rpt_side_cd, cntra_mp_id
+        - clean_post1.msg_seq_nb = post_Y.orig_msg_seq_nb (asymmetric)
+    
+    Key insight: Y records contain orig_msg_seq_nb pointing to the original 
+    trade's msg_seq_nb. This creates an asymmetric join condition. Matched 
+    T/R records are removed.
+    
+    Parameters
+    ----------
+    post : pandas.DataFrame
+        Enhanced TRACE records with trd_rpt_dt >= '2012-02-06'. Must contain:
+        - cusip_id : str
+            CUSIP identifier
+        - trd_exctn_dt : datetime
+            Trade execution date
+        - trd_exctn_tm : str or time
+            Trade execution time
+        - trd_rpt_dt : datetime
+            Trade report date (used for date filtering upstream)
+        - rptd_pr : float
+            Reported price
+        - entrd_vol_qt : float or int
+            Entered volume quantity
+        - rpt_side_cd : str
+            Reporting side code ('B' or 'S')
+        - cntra_mp_id : str
+            Contra-party market participant ID ('C' or 'D')
+        - msg_seq_nb : str or int
+            Message sequence number (unique trade identifier)
+        - orig_msg_seq_nb : str or int
+            Original message sequence number (for Y reversals)
+        - trc_st : str
+            Transaction status ('T', 'R', 'X', 'C', 'Y')
+                   
+    Returns
+    -------
+    pandas.DataFrame
+        Cleaned dataset with cancellations, corrections, and reversals removed.
+        Contains only valid trade reports (T/R records that were not matched
+        to any C/X/Y records). Empty DataFrame returned if input is empty.
+        
+        The returned DataFrame:
+        - Preserves all columns from the input
+        - May have fewer rows due to cancellation/reversal removal
+        - Is not sorted (downstream code should sort as needed)
+        - Has reset index (ignore_index=True used in operations)        
+    """
     
     if post.empty:
         return pd.DataFrame()
     
+    # Store original for logging
     original_post = post['cusip_id'].copy()
     
-    # Split data
+    # Split data based on trc_st
     post_TR = post[post['trc_st'].isin(['T', 'R'])].copy()
     post_XC = post[post['trc_st'].isin(['X', 'C'])].copy()
-    post_Y = post[post['trc_st'] == 'Y'].copy()
-    
-    # ========================================
-    # Step 1.1: Remove Cancellation/Correction
-    # ========================================
+    post_Y  = post[post['trc_st'] == 'Y'].copy()
+        
+    # Step 1.1: Remove Cancellation and Correction
+    # Match Cancellation and Correction using 7 keys + msg_seq_nb:
+    # cusip_id, Execution Date and Time, Quantity, Price, Buy/Sell Indicator, 
+    # Contra Party, msg_seq_nb
+    # C and X records show the same MSG_SEQ_NB as the original record
     if not post_XC.empty and not post_TR.empty:
-        # Create tuple-based keys
-        post_TR['_key'] = list(zip(
-            post_TR['cusip_id'],
-            post_TR['trd_exctn_dt'],
-            post_TR['trd_exctn_tm'],
-            post_TR['rptd_pr'],
-            post_TR['entrd_vol_qt'],
-            post_TR['rpt_side_cd'],
-            post_TR['cntra_mp_id'],
-            post_TR['msg_seq_nb']
-        ))
+        # Create a merge key for matching
+        post_TR['merge_key'] = (post_TR['cusip_id'] + '_' + 
+                                post_TR['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
+                                post_TR['trd_exctn_tm'].astype(str) + '_' + 
+                                post_TR['rptd_pr'].astype(str) + '_' +
+                                post_TR['entrd_vol_qt'].astype(str) + '_' + 
+                                post_TR['rpt_side_cd'] + '_' +
+                                post_TR['cntra_mp_id'] + '_' + 
+                                post_TR['msg_seq_nb'].astype(str))
         
-        post_XC['_key'] = list(zip(
-            post_XC['cusip_id'],
-            post_XC['trd_exctn_dt'],
-            post_XC['trd_exctn_tm'],
-            post_XC['rptd_pr'],
-            post_XC['entrd_vol_qt'],
-            post_XC['rpt_side_cd'],
-            post_XC['cntra_mp_id'],
-            post_XC['msg_seq_nb']
-        ))
+        post_XC['merge_key'] = (post_XC['cusip_id'] + '_' + 
+                                post_XC['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
+                                post_XC['trd_exctn_tm'].astype(str) + '_' + 
+                                post_XC['rptd_pr'].astype(str) + '_' +
+                                post_XC['entrd_vol_qt'].astype(str) + '_' + 
+                                post_XC['rpt_side_cd'] + '_' +
+                                post_XC['cntra_mp_id'] + '_' + 
+                                post_XC['msg_seq_nb'].astype(str))
         
-        xc_keys = set(post_XC['_key'])
-        clean_post1 = post_TR[~post_TR['_key'].isin(xc_keys)].drop(columns=['_key'])
+        # Keep records that don't have matches in post_XC
+        clean_post1 = post_TR[~post_TR['merge_key'].isin(post_XC['merge_key'])].copy()
+        clean_post1.drop(columns=['merge_key'], inplace=True)
     else:
-        clean_post1 = post_TR
+        clean_post1 = post_TR.copy()
     
-    if logger:
+    if logger:              
         logger(original_post, clean_post1, "post_cancel_corr", chunk_id)
-    
-    # ========================================
+        
     # Step 1.2: Remove Reversals
-    # ========================================
+    # Match Reversal using the same 7 keys but:
+    # - Use msg_seq_nb from clean_post1
+    # - Use orig_msg_seq_nb from post_Y (not msg_seq_nb!)
     if not post_Y.empty and not clean_post1.empty:
-        clean_post1['_key'] = list(zip(
-            clean_post1['cusip_id'],
-            clean_post1['trd_exctn_dt'],
-            clean_post1['trd_exctn_tm'],
-            clean_post1['rptd_pr'],
-            clean_post1['entrd_vol_qt'],
-            clean_post1['rpt_side_cd'],
-            clean_post1['cntra_mp_id'],
-            clean_post1['msg_seq_nb']
-        ))
+        # Create merge keys 
+        # For clean_post1: use msg_seq_nb
+        clean_post1['merge_key'] = (clean_post1['cusip_id'] + '_' + 
+                                    clean_post1['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
+                                    clean_post1['trd_exctn_tm'].astype(str) + '_' + 
+                                    clean_post1['rptd_pr'].astype(str) + '_' +
+                                    clean_post1['entrd_vol_qt'].astype(str) + '_' + 
+                                    clean_post1['rpt_side_cd'] + '_' +
+                                    clean_post1['cntra_mp_id'] + '_' + 
+                                    clean_post1['msg_seq_nb'].astype(str))  # <-- msg_seq_nb
         
-        # Use orig_msg_seq_nb for reversals
-        post_Y['_key'] = list(zip(
-            post_Y['cusip_id'],
-            post_Y['trd_exctn_dt'],
-            post_Y['trd_exctn_tm'],
-            post_Y['rptd_pr'],
-            post_Y['entrd_vol_qt'],
-            post_Y['rpt_side_cd'],
-            post_Y['cntra_mp_id'],
-            post_Y['orig_msg_seq_nb']  # Note: orig_msg_seq_nb
-        ))
+        # For post_Y: use orig_msg_seq_nb (not msg_seq_nb!)
+        post_Y['merge_key'] = (post_Y['cusip_id'] + '_' + 
+                               post_Y['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
+                               post_Y['trd_exctn_tm'].astype(str) + '_' + 
+                               post_Y['rptd_pr'].astype(str) + '_' +
+                               post_Y['entrd_vol_qt'].astype(str) + '_' + 
+                               post_Y['rpt_side_cd'] + '_' +
+                               post_Y['cntra_mp_id'] + '_' + 
+                               post_Y['orig_msg_seq_nb'].astype(str))  # <-- orig_msg_seq_nb!
         
-        y_keys = set(post_Y['_key'])
-        clean_post2 = clean_post1[~clean_post1['_key'].isin(y_keys)].drop(columns=['_key'])
+        # Keep records that don't have matches in post_Y
+        clean_post2 = clean_post1[~clean_post1['merge_key'].isin(post_Y['merge_key'])].copy()
+        clean_post2.drop(columns=['merge_key'], inplace=True)
     else:
-        clean_post2 = clean_post1
-    
-    if logger:
+        clean_post2 = clean_post1.copy()
+        
+    if logger:              
         logger(clean_post1, clean_post2, "post_reversals", chunk_id)
     
     return clean_post2
-
 # -------------------------------------------------------------------------
-# def clean_pre_20120206(pre, *, chunk_id=None, logger=None):
-#     """
-#     Clean Enhanced TRACE data reported before February 6, 2012.
-    
-#     Removes cancellations (C), corrections (W), and reversals (asof_cd='R') from 
-#     pre-2012 TRACE Enhanced data using the legacy reporting structure. This function 
-#     implements the three-stage cleaning procedure described in Dick-Nielsen (2009, 2014) 
-#     for the original TRACE reporting system with special handling for correction chains.
-    
-#     Regulatory Context
-#     ------------------
-#     Before February 6, 2012, FINRA used a different TRACE reporting structure:
-#     - 'T': Trade Report (original transaction)
-#     - 'C': Cancellation (ORIG_MSG_SEQ_NB points to original trade's MSG_SEQ_NB)
-#     - 'W': Correction (can form chains where W corrects W corrects T)
-#     - asof_cd='R': Reversal indicator (requires sequence-based matching)
-#     - asof_cd='D': Delayed dissemination (excluded from matching)
-#     - asof_cd='X': Delayed reversal (excluded from matching)
-                
-#     Returns
-#     -------
-#     pandas.DataFrame
-#         Cleaned dataset with cancellations, corrections, and reversals removed.
-#         For corrections, matched T records are replaced with their corresponding
-#         W records (the corrected versions). Empty DataFrame returned if input is empty.
-        
-#         The returned DataFrame:
-#         - Preserves all columns from the input
-#         - Contains corrected W records in place of original T records
-#         - Has fewer rows due to cancellation/reversal removal
-#         - Is not sorted (downstream code should sort as needed)
-#         - Has reset index from concatenation operations
-    
-#     References
-#     ----------
-#     - Dick-Nielsen, J. (2009). "Liquidity Biases in TRACE." Journal of Fixed 
-#       Income, 19(2), 43-55.
-#     - Dick-Nielsen, J. (2014). "How to Clean Enhanced TRACE Data." Working Paper.
-#     - FINRA TRACE Historical Reporting Guide
-    
-#     See Also
-#     --------
-#     clean_post_20120206 : Cleaning function for post-2012 data (simpler logic)
-#     clean_agency_transactions : Removes inter-dealer duplicate reporting
-#     """
-#     if pre.empty:
-#         return pd.DataFrame()
-    
-#     # Store original for logging
-#     original_pre = pre['cusip_id'].copy()
-    
-#     # Split data based on trc_st
-#     pre_C = pre[pre['trc_st'] == 'C'].copy()
-#     pre_W = pre[pre['trc_st'] == 'W'].copy()
-#     pre_T = pre[pre['trc_st'] == 'T'].copy()
-    
-#     # Step 2.1: Remove Cancellation Cases (C)
-#     if not pre_C.empty and not pre_T.empty:
-#         # Create keys for matching
-#         pre_T['cancel_key'] = (pre_T['cusip_id'] + '_' + 
-#                               pre_T['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
-#                               pre_T['trd_exctn_tm'].astype(str) + '_' + 
-#                               pre_T['rptd_pr'].astype(str) + '_' +
-#                               pre_T['entrd_vol_qt'].astype(str) + '_' + 
-#                               pre_T['trd_rpt_dt'].dt.strftime('%Y%m%d') + '_' +
-#                               pre_T['msg_seq_nb'].astype(str))
-        
-#         pre_C['cancel_key'] = (pre_C['cusip_id'] + '_' + 
-#                               pre_C['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
-#                               pre_C['trd_exctn_tm'].astype(str) + '_' + 
-#                               pre_C['rptd_pr'].astype(str) + '_' +
-#                               pre_C['entrd_vol_qt'].astype(str) + '_' + 
-#                               pre_C['trd_rpt_dt'].dt.strftime('%Y%m%d') + '_' +
-#                               pre_C['orig_msg_seq_nb'].astype(str))
-        
-#         # Keep records that don't have matches in pre_C
-#         clean_pre1 = pre_T[~pre_T['cancel_key'].isin(pre_C['cancel_key'])].copy()
-#         clean_pre1.drop(columns=['cancel_key'], inplace=True)
-#     else:
-#         clean_pre1 = pre_T.copy()
-        
-#     if logger:                                       
-#         logger(original_pre, clean_pre1, "pre_cancel_C", chunk_id)
-    
-#     # Step 2.2: Remove Correction Cases (W) - keeping your existing logic as it looks correct
-#     if not pre_W.empty and not clean_pre1.empty:
-#         # [Keeping your existing W correction logic as is - it appears correct]
-#         w_msg = pre_W[['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 'msg_seq_nb']].copy()
-#         w_msg['flag'] = 'msg'
-        
-#         w_omsg = pre_W[['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 'orig_msg_seq_nb']].copy()
-#         w_omsg = w_omsg.rename(columns={'orig_msg_seq_nb': 'msg_seq_nb'})
-#         w_omsg['flag'] = 'omsg'
-        
-#         w_combined = pd.concat([w_msg, w_omsg], ignore_index=True)
-        
-#         w_napp = w_combined.groupby(['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 
-#                                      'trd_exctn_tm', 'msg_seq_nb']).size().reset_index(name='napp')
-        
-#         w_mult = w_combined.drop_duplicates(['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 
-#                                              'trd_exctn_tm', 'msg_seq_nb', 'flag'])
-#         w_ntype = w_mult.groupby(['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 
-#                                   'trd_exctn_tm', 'msg_seq_nb']).size().reset_index(name='ntype')
-        
-#         w_comb = pd.merge(w_napp, w_ntype, 
-#                          on=['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 'msg_seq_nb'], 
-#                          how='left')
-        
-#         w_keep = w_comb[(w_comb['napp'] == 1) | ((w_comb['napp'] > 1) & (w_comb['ntype'] == 1))]
-#         w_keep = pd.merge(w_keep, w_combined, 
-#                          on=['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 'msg_seq_nb'], 
-#                          how='inner')
-        
-#         w_keep['npair'] = w_keep.groupby(['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm']).transform('size') / 2
-        
-#         w_keep1 = w_keep[w_keep['npair'] == 1].copy()
-#         w_keep1_pivot = w_keep1.pivot_table(
-#             index=['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm'], 
-#             columns='flag', values='msg_seq_nb', aggfunc='first'
-#         ).reset_index()
-#         w_keep1_pivot = w_keep1_pivot.rename(columns={'msg': 'msg_seq_nb', 'omsg': 'orig_msg_seq_nb'})
-        
-#         w_keep2 = w_keep[(w_keep['npair'] > 1) & (w_keep['flag'] == 'msg')].copy()
-#         w_keep2 = pd.merge(
-#             w_keep2[['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 'msg_seq_nb']], 
-#             pre_W[['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm', 'msg_seq_nb', 'orig_msg_seq_nb']], 
-#             on=['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm', 'msg_seq_nb'], 
-#             how='left'
-#         )
-        
-#         w_clean = pd.concat([
-#             w_keep1_pivot, 
-#             w_keep2[['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 
-#                     'msg_seq_nb', 'orig_msg_seq_nb']]
-#         ], ignore_index=True)
-#         w_clean = w_clean.drop(columns=['bond_sym_id'])
-        
-#         w_clean_full = pd.merge(w_clean, pre_W.drop(columns=['orig_msg_seq_nb']), 
-#                                on=['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm', 'msg_seq_nb'], 
-#                                how='left')
-        
-#         clean_pre1['correction_key'] = (clean_pre1['cusip_id'] + '_' + 
-#                                         clean_pre1['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
-#                                         clean_pre1['msg_seq_nb'].astype(str))
-        
-#         w_clean_full['correction_key'] = (w_clean_full['cusip_id'] + '_' + 
-#                                           w_clean_full['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
-#                                           w_clean_full['orig_msg_seq_nb'].astype(str))
-        
-#         clean_pre2 = clean_pre1[~clean_pre1['correction_key'].isin(w_clean_full['correction_key'])].copy()
-        
-#         matched_t_keys = clean_pre1['correction_key'][
-#             clean_pre1['correction_key'].isin(w_clean_full['correction_key'])
-#         ].tolist()
-#         w_to_add = w_clean_full[w_clean_full['correction_key'].isin(matched_t_keys)].copy()
-        
-#         w_to_add = w_to_add.drop_duplicates(
-#             ['cusip_id', 'trd_exctn_dt', 'msg_seq_nb', 'orig_msg_seq_nb', 'rptd_pr', 'entrd_vol_qt']
-#         )
-        
-#         clean_pre2.drop(columns=['correction_key'], inplace=True)
-#         w_to_add.drop(columns=['correction_key'], inplace=True)
-#         clean_pre3 = pd.concat([clean_pre2, w_to_add], ignore_index=True)
-#     else:
-#         clean_pre3 = clean_pre1.copy()
-    
-#     if logger:
-#         logger(clean_pre1, clean_pre3, "pre_correction_W", chunk_id)
-    
-#     # Step 2.3: Reversal Case - CORRECTED TO MATCH SAS EXACTLY
-#     # Extract reversal records
-#     rev_header = clean_pre3[clean_pre3['asof_cd'] == 'R'][
-#         ['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 
-#          'trd_rpt_dt', 'trd_rpt_tm', 'entrd_vol_qt', 'rptd_pr', 
-#          'rpt_side_cd', 'cntra_mp_id']
-#     ].copy()
-    
-#     # Remove records that are R (reversal) D (Delayed dissemination) and X (delayed reversal)
-#     clean_pre4 = clean_pre3[~clean_pre3['asof_cd'].isin(['R', 'X', 'D'])].copy()
-    
-#     if rev_header.empty or clean_pre4.empty:
-#         clean_pre5 = clean_pre4.copy()
-#     else:
-#         # Prepare header for clean_pre4
-#         clean_pre4_header = clean_pre4[
-#             ['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 
-#              'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id', 
-#              'trd_rpt_dt', 'trd_rpt_tm', 'msg_seq_nb']
-#         ].copy()
-        
-#         # =========================
-#         # Option A: 7-key matching (including execution time)
-#         # =========================
-        
-#         # Sort for 7-key sequence numbering
-#         rev_header7 = rev_header.sort_values([
-#             'cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 
-#             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id', 
-#             'trd_rpt_dt', 'trd_rpt_tm'
-#         ]).copy()
-        
-#         # Add sequence number for 7-key groups
-#         rev_header7['seq'] = rev_header7.groupby([
-#             'cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm',
-#             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id'
-#         ]).cumcount() + 1
-        
-#         # Sort clean_pre4_header for 7-key sequence numbering
-#         clean_pre4_header7 = clean_pre4_header.sort_values([
-#             'cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm',
-#             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id',
-#             'trd_rpt_dt', 'trd_rpt_tm', 'msg_seq_nb'
-#         ]).copy()
-        
-#         clean_pre4_header7['seq7'] = clean_pre4_header7.groupby([
-#             'cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm',
-#             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id'
-#         ]).cumcount() + 1
-        
-#         # =========================
-#         # Option B: 6-key matching (excluding execution time)
-#         # =========================
-        
-#         # Sort for 6-key sequence numbering (note different sort order!)
-#         rev_header6 = rev_header.sort_values([
-#             'cusip_id', 'bond_sym_id', 'trd_exctn_dt',  # <-- no trd_exctn_tm here
-#             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id',
-#             'trd_exctn_tm', 'trd_rpt_dt', 'trd_rpt_tm'  # <-- trd_exctn_tm comes after the groupby keys
-#         ]).copy()
-        
-#         # Add sequence number for 6-key groups
-#         rev_header6['seq'] = rev_header6.groupby([
-#             'cusip_id', 'bond_sym_id', 'trd_exctn_dt',  # <-- no trd_exctn_tm in groupby
-#             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id'
-#         ]).cumcount() + 1
-        
-#         # Sort clean_pre4_header for 6-key sequence numbering
-#         clean_pre4_header6 = clean_pre4_header.sort_values([
-#             'cusip_id', 'bond_sym_id', 'trd_exctn_dt',  # <-- no trd_exctn_tm here
-#             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id',
-#             'trd_exctn_tm', 'trd_rpt_dt', 'trd_rpt_tm', 'msg_seq_nb'
-#         ]).copy()
-        
-#         clean_pre4_header6['seq6'] = clean_pre4_header6.groupby([
-#             'cusip_id', 'bond_sym_id', 'trd_exctn_dt',  # <-- no trd_exctn_tm in groupby
-#             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id'
-#         ]).cumcount() + 1
-        
-#         # =========================
-#         # Perform the joins (matching SAS SQL logic)
-#         # =========================
-        
-#         # First do 7-key join
-#         clean_pre5_header = pd.merge(
-#             clean_pre4_header7,
-#             rev_header7[['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm', 
-#                         'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 
-#                         'cntra_mp_id', 'seq']].rename(columns={'seq': 'rev_seq7'}),
-#             left_on=['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm',
-#                     'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 
-#                     'cntra_mp_id', 'seq7'],
-#             right_on=['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm',
-#                      'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd',
-#                      'cntra_mp_id', 'rev_seq7'],
-#             how='left'
-#         )
-        
-#         # Then do 6-key join - need to add seq6 from clean_pre4_header6 first
-#         # Merge clean_pre5_header with clean_pre4_header6 to get seq6 column
-#         clean_pre5_header = pd.merge(
-#             clean_pre5_header,
-#             clean_pre4_header6[['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm',
-#                                'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd',
-#                                'cntra_mp_id', 'msg_seq_nb', 'trd_rpt_dt', 'trd_rpt_tm', 'seq6']],
-#             on=['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm',
-#                 'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd',
-#                 'cntra_mp_id', 'msg_seq_nb', 'trd_rpt_dt', 'trd_rpt_tm'],
-#             how='left'
-#         )
-        
-#         # Now do the 6-key join with reversals
-#         clean_pre5_header = pd.merge(
-#             clean_pre5_header,
-#             rev_header6[['cusip_id', 'trd_exctn_dt',  # no trd_exctn_tm in join
-#                         'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd',
-#                         'cntra_mp_id', 'seq']].rename(columns={'seq': 'rev_seq6'}),
-#             left_on=['cusip_id', 'trd_exctn_dt',  # no trd_exctn_tm in join
-#                     'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd',
-#                     'cntra_mp_id', 'seq6'],
-#             right_on=['cusip_id', 'trd_exctn_dt',  # no trd_exctn_tm in join
-#                      'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd',
-#                      'cntra_mp_id', 'rev_seq6'],
-#             how='left'
-#         )
-        
-#         # As per SAS: use 6-key results (better match rate)
-#         # Keep only records where rev_seq6 is null (i.e., no match found)
-#         clean_pre5_header = clean_pre5_header[clean_pre5_header['rev_seq6'].isna()].copy()
-#         clean_pre5_header = clean_pre5_header.drop(columns=['rev_seq6', 'rev_seq7', 'seq7'], errors='ignore')
-        
-#         # Join back to get all columns from clean_pre4
-#         # Using all the identifying columns for the join
-#         clean_pre5 = pd.merge(
-#             clean_pre4,
-#             clean_pre5_header[['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm',
-#                               'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd',
-#                               'cntra_mp_id', 'msg_seq_nb', 'trd_rpt_dt', 'trd_rpt_tm']],
-#             on=['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm',
-#                 'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 
-#                 'cntra_mp_id', 'msg_seq_nb', 'trd_rpt_dt', 'trd_rpt_tm'],
-#             how='inner'
-#         )
-    
-#     if logger:
-#         logger(clean_pre3, clean_pre5, "pre_reversal", chunk_id)
-    
-#     return clean_pre5
-
-
 def clean_pre_20120206(pre, *, chunk_id=None, logger=None):
+    """
+    Clean Enhanced TRACE data reported before February 6, 2012.
     
+    Removes cancellations (C), corrections (W), and reversals (asof_cd='R') from 
+    pre-2012 TRACE Enhanced data using the legacy reporting structure. This function 
+    implements the three-stage cleaning procedure described in Dick-Nielsen (2009, 2014) 
+    for the original TRACE reporting system with special handling for correction chains.
+    
+    Regulatory Context
+    ------------------
+    Before February 6, 2012, FINRA used a different TRACE reporting structure:
+    - 'T': Trade Report (original transaction)
+    - 'C': Cancellation (ORIG_MSG_SEQ_NB points to original trade's MSG_SEQ_NB)
+    - 'W': Correction (can form chains where W corrects W corrects T)
+    - asof_cd='R': Reversal indicator (requires sequence-based matching)
+    - asof_cd='D': Delayed dissemination (excluded from matching)
+    - asof_cd='X': Delayed reversal (excluded from matching)
+                
+    Returns
+    -------
+    pandas.DataFrame
+        Cleaned dataset with cancellations, corrections, and reversals removed.
+        For corrections, matched T records are replaced with their corresponding
+        W records (the corrected versions). Empty DataFrame returned if input is empty.
+        
+        The returned DataFrame:
+        - Preserves all columns from the input
+        - Contains corrected W records in place of original T records
+        - Has fewer rows due to cancellation/reversal removal
+        - Is not sorted (downstream code should sort as needed)
+        - Has reset index from concatenation operations
+    
+    References
+    ----------
+    - Dick-Nielsen, J. (2009). "Liquidity Biases in TRACE." Journal of Fixed 
+      Income, 19(2), 43-55.
+    - Dick-Nielsen, J. (2014). "How to Clean Enhanced TRACE Data." Working Paper.
+    - FINRA TRACE Historical Reporting Guide
+    
+    See Also
+    --------
+    clean_post_20120206 : Cleaning function for post-2012 data (simpler logic)
+    clean_agency_transactions : Removes inter-dealer duplicate reporting
+    """
     if pre.empty:
         return pd.DataFrame()
     
+    # Store original for logging
     original_pre = pre['cusip_id'].copy()
     
     # Split data based on trc_st
@@ -2420,45 +1948,37 @@ def clean_pre_20120206(pre, *, chunk_id=None, logger=None):
     pre_W = pre[pre['trc_st'] == 'W'].copy()
     pre_T = pre[pre['trc_st'] == 'T'].copy()
     
-    # ========================================
-    # Step 2.1: Remove Cancellations (C) - OPTIMIZED
-    # ========================================
+    # Step 2.1: Remove Cancellation Cases (C)
     if not pre_C.empty and not pre_T.empty:
-        # Use tuples instead of string concatenation
-        pre_T['cancel_key'] = list(zip(
-            pre_T['cusip_id'],
-            pre_T['trd_exctn_dt'],
-            pre_T['trd_exctn_tm'],
-            pre_T['rptd_pr'],
-            pre_T['entrd_vol_qt'],
-            pre_T['trd_rpt_dt'],
-            pre_T['msg_seq_nb']
-        ))
+        # Create keys for matching
+        pre_T['cancel_key'] = (pre_T['cusip_id'] + '_' + 
+                              pre_T['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
+                              pre_T['trd_exctn_tm'].astype(str) + '_' + 
+                              pre_T['rptd_pr'].astype(str) + '_' +
+                              pre_T['entrd_vol_qt'].astype(str) + '_' + 
+                              pre_T['trd_rpt_dt'].dt.strftime('%Y%m%d') + '_' +
+                              pre_T['msg_seq_nb'].astype(str))
         
-        pre_C['cancel_key'] = list(zip(
-            pre_C['cusip_id'],
-            pre_C['trd_exctn_dt'],
-            pre_C['trd_exctn_tm'],
-            pre_C['rptd_pr'],
-            pre_C['entrd_vol_qt'],
-            pre_C['trd_rpt_dt'],
-            pre_C['orig_msg_seq_nb']  # Note: different column
-        ))
+        pre_C['cancel_key'] = (pre_C['cusip_id'] + '_' + 
+                              pre_C['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
+                              pre_C['trd_exctn_tm'].astype(str) + '_' + 
+                              pre_C['rptd_pr'].astype(str) + '_' +
+                              pre_C['entrd_vol_qt'].astype(str) + '_' + 
+                              pre_C['trd_rpt_dt'].dt.strftime('%Y%m%d') + '_' +
+                              pre_C['orig_msg_seq_nb'].astype(str))
         
-        # Fast set-based lookup
-        c_keys = set(pre_C['cancel_key'])
-        clean_pre1 = pre_T[~pre_T['cancel_key'].isin(c_keys)].drop(columns=['cancel_key'])
+        # Keep records that don't have matches in pre_C
+        clean_pre1 = pre_T[~pre_T['cancel_key'].isin(pre_C['cancel_key'])].copy()
+        clean_pre1.drop(columns=['cancel_key'], inplace=True)
     else:
-        clean_pre1 = pre_T
-    
-    if logger:
+        clean_pre1 = pre_T.copy()
+        
+    if logger:                                       
         logger(original_pre, clean_pre1, "pre_cancel_C", chunk_id)
     
-    # ========================================
-    # Step 2.2: Remove Corrections (W) - OPTIMIZED
-    # ========================================
+    # Step 2.2: Remove Correction Cases (W) - keeping your existing logic as it looks correct
     if not pre_W.empty and not clean_pre1.empty:
-        # Keep your existing W logic but optimize the final matching
+        # [Keeping your existing W correction logic as is - it appears correct]
         w_msg = pre_W[['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 'msg_seq_nb']].copy()
         w_msg['flag'] = 'msg'
         
@@ -2513,78 +2033,73 @@ def clean_pre_20120206(pre, *, chunk_id=None, logger=None):
                                on=['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm', 'msg_seq_nb'], 
                                how='left')
         
-        # OPTIMIZED: Use tuples instead of string concat
-        clean_pre1['correction_key'] = list(zip(
-            clean_pre1['cusip_id'],
-            clean_pre1['trd_exctn_dt'],
-            clean_pre1['msg_seq_nb']
-        ))
+        clean_pre1['correction_key'] = (clean_pre1['cusip_id'] + '_' + 
+                                        clean_pre1['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
+                                        clean_pre1['msg_seq_nb'].astype(str))
         
-        w_clean_full['correction_key'] = list(zip(
-            w_clean_full['cusip_id'],
-            w_clean_full['trd_exctn_dt'],
-            w_clean_full['orig_msg_seq_nb']
-        ))
+        w_clean_full['correction_key'] = (w_clean_full['cusip_id'] + '_' + 
+                                          w_clean_full['trd_exctn_dt'].dt.strftime('%Y%m%d') + '_' +
+                                          w_clean_full['orig_msg_seq_nb'].astype(str))
         
-        # Set-based lookup
-        w_keys = set(w_clean_full['correction_key'])
-        clean_pre2 = clean_pre1[~clean_pre1['correction_key'].isin(w_keys)].copy()
+        clean_pre2 = clean_pre1[~clean_pre1['correction_key'].isin(w_clean_full['correction_key'])].copy()
         
-        matched_t_keys = set(clean_pre1.loc[
-            clean_pre1['correction_key'].isin(w_keys), 'correction_key'
-        ])
+        matched_t_keys = clean_pre1['correction_key'][
+            clean_pre1['correction_key'].isin(w_clean_full['correction_key'])
+        ].tolist()
         w_to_add = w_clean_full[w_clean_full['correction_key'].isin(matched_t_keys)].copy()
         
         w_to_add = w_to_add.drop_duplicates(
             ['cusip_id', 'trd_exctn_dt', 'msg_seq_nb', 'orig_msg_seq_nb', 'rptd_pr', 'entrd_vol_qt']
         )
         
-        clean_pre2 = clean_pre2.drop(columns=['correction_key'])
-        w_to_add = w_to_add.drop(columns=['correction_key'])
+        clean_pre2.drop(columns=['correction_key'], inplace=True)
+        w_to_add.drop(columns=['correction_key'], inplace=True)
         clean_pre3 = pd.concat([clean_pre2, w_to_add], ignore_index=True)
     else:
-        clean_pre3 = clean_pre1
+        clean_pre3 = clean_pre1.copy()
     
     if logger:
         logger(clean_pre1, clean_pre3, "pre_correction_W", chunk_id)
     
-    # ========================================
-    # Step 2.3: Reversals - KEEP AS IS (complex logic)
-    # ========================================
-    # [Keep your reversal logic - it's complex and correct]
-    # The reversal section is the most expensive but hardest to optimize
-    # without changing the matching logic
-    
+    # Step 2.3: Reversal Case - CORRECTED TO MATCH SAS EXACTLY
+    # Extract reversal records
     rev_header = clean_pre3[clean_pre3['asof_cd'] == 'R'][
         ['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 
          'trd_rpt_dt', 'trd_rpt_tm', 'entrd_vol_qt', 'rptd_pr', 
          'rpt_side_cd', 'cntra_mp_id']
     ].copy()
     
+    # Remove records that are R (reversal) D (Delayed dissemination) and X (delayed reversal)
     clean_pre4 = clean_pre3[~clean_pre3['asof_cd'].isin(['R', 'X', 'D'])].copy()
     
     if rev_header.empty or clean_pre4.empty:
-        clean_pre5 = clean_pre4
+        clean_pre5 = clean_pre4.copy()
     else:
-        # [Keep all your existing reversal logic]
+        # Prepare header for clean_pre4
         clean_pre4_header = clean_pre4[
             ['cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 
              'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id', 
              'trd_rpt_dt', 'trd_rpt_tm', 'msg_seq_nb']
         ].copy()
         
-        # 7-key matching
+        # =========================
+        # Option A: 7-key matching (including execution time)
+        # =========================
+        
+        # Sort for 7-key sequence numbering
         rev_header7 = rev_header.sort_values([
             'cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm', 
             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id', 
             'trd_rpt_dt', 'trd_rpt_tm'
         ]).copy()
         
+        # Add sequence number for 7-key groups
         rev_header7['seq'] = rev_header7.groupby([
             'cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm',
             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id'
         ]).cumcount() + 1
         
+        # Sort clean_pre4_header for 7-key sequence numbering
         clean_pre4_header7 = clean_pre4_header.sort_values([
             'cusip_id', 'bond_sym_id', 'trd_exctn_dt', 'trd_exctn_tm',
             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id',
@@ -2596,30 +2111,40 @@ def clean_pre_20120206(pre, *, chunk_id=None, logger=None):
             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id'
         ]).cumcount() + 1
         
-        # 6-key matching
+        # =========================
+        # Option B: 6-key matching (excluding execution time)
+        # =========================
+        
+        # Sort for 6-key sequence numbering (note different sort order!)
         rev_header6 = rev_header.sort_values([
-            'cusip_id', 'bond_sym_id', 'trd_exctn_dt',
+            'cusip_id', 'bond_sym_id', 'trd_exctn_dt',  # <-- no trd_exctn_tm here
             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id',
-            'trd_exctn_tm', 'trd_rpt_dt', 'trd_rpt_tm'
+            'trd_exctn_tm', 'trd_rpt_dt', 'trd_rpt_tm'  # <-- trd_exctn_tm comes after the groupby keys
         ]).copy()
         
+        # Add sequence number for 6-key groups
         rev_header6['seq'] = rev_header6.groupby([
-            'cusip_id', 'bond_sym_id', 'trd_exctn_dt',
+            'cusip_id', 'bond_sym_id', 'trd_exctn_dt',  # <-- no trd_exctn_tm in groupby
             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id'
         ]).cumcount() + 1
         
+        # Sort clean_pre4_header for 6-key sequence numbering
         clean_pre4_header6 = clean_pre4_header.sort_values([
-            'cusip_id', 'bond_sym_id', 'trd_exctn_dt',
+            'cusip_id', 'bond_sym_id', 'trd_exctn_dt',  # <-- no trd_exctn_tm here
             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id',
             'trd_exctn_tm', 'trd_rpt_dt', 'trd_rpt_tm', 'msg_seq_nb'
         ]).copy()
         
         clean_pre4_header6['seq6'] = clean_pre4_header6.groupby([
-            'cusip_id', 'bond_sym_id', 'trd_exctn_dt',
+            'cusip_id', 'bond_sym_id', 'trd_exctn_dt',  # <-- no trd_exctn_tm in groupby
             'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd', 'cntra_mp_id'
         ]).cumcount() + 1
         
-        # Perform joins
+        # =========================
+        # Perform the joins (matching SAS SQL logic)
+        # =========================
+        
+        # First do 7-key join
         clean_pre5_header = pd.merge(
             clean_pre4_header7,
             rev_header7[['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm', 
@@ -2634,6 +2159,8 @@ def clean_pre_20120206(pre, *, chunk_id=None, logger=None):
             how='left'
         )
         
+        # Then do 6-key join - need to add seq6 from clean_pre4_header6 first
+        # Merge clean_pre5_header with clean_pre4_header6 to get seq6 column
         clean_pre5_header = pd.merge(
             clean_pre5_header,
             clean_pre4_header6[['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm',
@@ -2645,23 +2172,28 @@ def clean_pre_20120206(pre, *, chunk_id=None, logger=None):
             how='left'
         )
         
+        # Now do the 6-key join with reversals
         clean_pre5_header = pd.merge(
             clean_pre5_header,
-            rev_header6[['cusip_id', 'trd_exctn_dt',
+            rev_header6[['cusip_id', 'trd_exctn_dt',  # no trd_exctn_tm in join
                         'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd',
                         'cntra_mp_id', 'seq']].rename(columns={'seq': 'rev_seq6'}),
-            left_on=['cusip_id', 'trd_exctn_dt',
+            left_on=['cusip_id', 'trd_exctn_dt',  # no trd_exctn_tm in join
                     'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd',
                     'cntra_mp_id', 'seq6'],
-            right_on=['cusip_id', 'trd_exctn_dt',
+            right_on=['cusip_id', 'trd_exctn_dt',  # no trd_exctn_tm in join
                      'entrd_vol_qt', 'rptd_pr', 'rpt_side_cd',
                      'cntra_mp_id', 'rev_seq6'],
             how='left'
         )
         
+        # As per SAS: use 6-key results (better match rate)
+        # Keep only records where rev_seq6 is null (i.e., no match found)
         clean_pre5_header = clean_pre5_header[clean_pre5_header['rev_seq6'].isna()].copy()
         clean_pre5_header = clean_pre5_header.drop(columns=['rev_seq6', 'rev_seq7', 'seq7'], errors='ignore')
         
+        # Join back to get all columns from clean_pre4
+        # Using all the identifying columns for the join
         clean_pre5 = pd.merge(
             clean_pre4,
             clean_pre5_header[['cusip_id', 'trd_exctn_dt', 'trd_exctn_tm',
@@ -2677,238 +2209,176 @@ def clean_pre_20120206(pre, *, chunk_id=None, logger=None):
         logger(clean_pre3, clean_pre5, "pre_reversal", chunk_id)
     
     return clean_pre5
-
 # -------------------------------------------------------------------------
-# def clean_agency_transactions(clean_combined, 
-#                               remove_all_interdealer_buys=False                            
-#                               ):
-#     """
-#     Remove double-counting from inter-dealer trades reported by both buy and sell sides.
+def clean_agency_transactions(clean_combined, 
+                              remove_all_interdealer_buys=False                            
+                              ):
+    """
+    Remove double-counting from inter-dealer trades reported by both buy and sell sides.
     
-#     Agency transactions (trades between dealers) can be reported by both the buyer
-#     and seller, leading to double-counting in aggregated statistics. This function
-#     identifies matched inter-dealer trades and removes the buy-side reports to 
-#     eliminate duplication while preserving all customer-dealer trades.
+    Agency transactions (trades between dealers) can be reported by both the buyer
+    and seller, leading to double-counting in aggregated statistics. This function
+    identifies matched inter-dealer trades and removes the buy-side reports to 
+    eliminate duplication while preserving all customer-dealer trades.
     
-#     Problem Context
-#     ---------------
-#     When two dealers trade with each other:
-#     - Dealer A (buyer) reports : rpt_side_cd='B', cntra_mp_id='D'
-#     - Dealer B (seller) reports: rpt_side_cd='S', cntra_mp_id='D'
+    Problem Context
+    ---------------
+    When two dealers trade with each other:
+    - Dealer A (buyer) reports : rpt_side_cd='B', cntra_mp_id='D'
+    - Dealer B (seller) reports: rpt_side_cd='S', cntra_mp_id='D'
     
-#     Both reports describe the same transaction, causing double-counting in volume
-#     and trade count statistics.
+    Both reports describe the same transaction, causing double-counting in volume
+    and trade count statistics.
     
-#     Solution Strategy
-#     -----------------
-#     Keep all sell-side inter-dealer trades (S, D) as the canonical records.
-#     For buy-side inter-dealer trades (B, D):
-#         - Match buy records to sell records using 4 keys (NO execution time)
-#         - Remove matched buy records (duplicates)
-#         - Keep unmatched buy records (unique information)
+    Solution Strategy
+    -----------------
+    Keep all sell-side inter-dealer trades (S, D) as the canonical records.
+    For buy-side inter-dealer trades (B, D):
+        - Match buy records to sell records using 4 keys (NO execution time)
+        - Remove matched buy records (duplicates)
+        - Keep unmatched buy records (unique information)
     
-#     Keep all customer trades (C) regardless of reporting side.
+    Keep all customer trades (C) regardless of reporting side.
     
-#     Final dataset composition:
-#         = All customer trades (cntra_mp_id='C')
-#         + All sell-side inter-dealer trades (rpt_side_cd='S', cntra_mp_id='D')
-#         + Unmatched buy-side inter-dealer trades (rpt_side_cd='B', cntra_mp_id='D')
+    Final dataset composition:
+        = All customer trades (cntra_mp_id='C')
+        + All sell-side inter-dealer trades (rpt_side_cd='S', cntra_mp_id='D')
+        + Unmatched buy-side inter-dealer trades (rpt_side_cd='B', cntra_mp_id='D')
     
-#     Matching Logic
-#     --------------
-#     Buy and sell records are matched using 4 keys:
-#         1. cusip_id: Same bond
-#         2. trd_exctn_dt: Same execution date
-#         3. rptd_pr: Same price
-#         4. entrd_vol_qt: Same volume
+    Matching Logic
+    --------------
+    Buy and sell records are matched using 4 keys:
+        1. cusip_id: Same bond
+        2. trd_exctn_dt: Same execution date
+        3. rptd_pr: Same price
+        4. entrd_vol_qt: Same volume
     
-#     **Critical: Execution time (trd_exctn_tm) is EXCLUDED from matching.**
+    **Critical: Execution time (trd_exctn_tm) is EXCLUDED from matching.**
     
-#     Rationale: Execution time is self-reported by each dealer and may differ
-#     slightly due to clock synchronization issues or reporting delays. Two trades
-#     on the same day with the same CUSIP, price, and volume are considered the
-#     same transaction even if reported at different times.
+    Rationale: Execution time is self-reported by each dealer and may differ
+    slightly due to clock synchronization issues or reporting delays. Two trades
+    on the same day with the same CUSIP, price, and volume are considered the
+    same transaction even if reported at different times.
     
-#     Parameters
-#     ----------
-#     clean_combined : pandas.DataFrame
-#         Combined cleaned TRACE data after cancellation, correction, and reversal
-#         removal. Must contain:
-#         - cusip_id : str
-#         - trd_exctn_dt : datetime
-#         - rptd_pr : float
-#         - entrd_vol_qt : float or int
-#         - rpt_side_cd : str ('B'=buy, 'S'=sell)
-#         - cntra_mp_id : str ('C'=customer, 'D'=dealer)
+    Parameters
+    ----------
+    clean_combined : pandas.DataFrame
+        Combined cleaned TRACE data after cancellation, correction, and reversal
+        removal. Must contain:
+        - cusip_id : str
+        - trd_exctn_dt : datetime
+        - rptd_pr : float
+        - entrd_vol_qt : float or int
+        - rpt_side_cd : str ('B'=buy, 'S'=sell)
+        - cntra_mp_id : str ('C'=customer, 'D'=dealer)
         
-#         Additional columns are preserved in output.
+        Additional columns are preserved in output.
         
-#     remove_all_interdealer_buys : bool, optional (default=False)
-#         Controls the aggressiveness of inter-dealer buy removal:
+    remove_all_interdealer_buys : bool, optional (default=False)
+        Controls the aggressiveness of inter-dealer buy removal:
         
-#         - False (DEFAULT): Remove only matched inter-dealer buys.
-#             Standard SAS behavior. Keeps unmatched buy-side reports that may 
-#             contain unique information. Conservative approach.
+        - False (DEFAULT): Remove only matched inter-dealer buys.
+            Standard SAS behavior. Keeps unmatched buy-side reports that may 
+            contain unique information. Conservative approach.
             
-#         - True (AGGRESSIVE): Remove ALL inter-dealer buys regardless of matching.
-#             Implements alternative approach: "Some calls to remove all inter-dealer 
-#             buys completely." Use when maximum consistency is needed over completeness.
+        - True (AGGRESSIVE): Remove ALL inter-dealer buys regardless of matching.
+            Implements alternative approach: "Some calls to remove all inter-dealer 
+            buys completely." Use when maximum consistency is needed over completeness.
     
-#     Returns
-#     -------
-#     pandas.DataFrame
-#         Cleaned data with inter-dealer double-counting removed:
-#         - All customer trades (cntra_mp_id='C')
-#         - All sell-side inter-dealer trades
-#         - Unmatched buy-side inter-dealer trades (default mode) OR
-#           No buy-side inter-dealer trades (aggressive mode)
+    Returns
+    -------
+    pandas.DataFrame
+        Cleaned data with inter-dealer double-counting removed:
+        - All customer trades (cntra_mp_id='C')
+        - All sell-side inter-dealer trades
+        - Unmatched buy-side inter-dealer trades (default mode) OR
+          No buy-side inter-dealer trades (aggressive mode)
         
-#         Empty DataFrame returned if input is empty. Index is reset.
+        Empty DataFrame returned if input is empty. Index is reset.
       
-#     Examples
-#     --------
-#     >>> # Basic usage (conservative mode)
-#     >>> trace_clean = clean_agency_transactions(trace_combined)
-#     >>> print(f"Removed: {len(trace_combined) - len(trace_clean)}")
+    Examples
+    --------
+    >>> # Basic usage (conservative mode)
+    >>> trace_clean = clean_agency_transactions(trace_combined)
+    >>> print(f"Removed: {len(trace_combined) - len(trace_clean)}")
     
-#     >>> # Aggressive mode
-#     >>> trace_clean = clean_agency_transactions(
-#     ...     trace_combined, 
-#     ...     remove_all_interdealer_buys=True
-#     ... )
+    >>> # Aggressive mode
+    >>> trace_clean = clean_agency_transactions(
+    ...     trace_combined, 
+    ...     remove_all_interdealer_buys=True
+    ... )
     
-#     >>> # Example: Inter-dealer trades on 2024-01-15
-#     >>> # Sell: CUSIP='123', Price=101.5, Vol=100K, Time=10:30:15
-#     >>> # Buy:  CUSIP='123', Price=101.5, Vol=100K, Time=10:30:18
-#     >>> # Result: Buy removed (3-second time difference ignored)
+    >>> # Example: Inter-dealer trades on 2024-01-15
+    >>> # Sell: CUSIP='123', Price=101.5, Vol=100K, Time=10:30:15
+    >>> # Buy:  CUSIP='123', Price=101.5, Vol=100K, Time=10:30:18
+    >>> # Result: Buy removed (3-second time difference ignored)
     
-#     References
-#     ----------
-#     - Dick-Nielsen, J. (2009). "Liquidity Biases in TRACE." Journal of Fixed 
-#       Income, 19(2), 43-55.
-#     - Dick-Nielsen, J. (2014). "How to Clean Enhanced TRACE Data." Working Paper.
+    References
+    ----------
+    - Dick-Nielsen, J. (2009). "Liquidity Biases in TRACE." Journal of Fixed 
+      Income, 19(2), 43-55.
+    - Dick-Nielsen, J. (2014). "How to Clean Enhanced TRACE Data." Working Paper.
     
-#     See Also
-#     --------
-#     clean_post_20120206 : Post-2012 cancellation/correction/reversal removal
-#     clean_pre_20120206 : Pre-2012 cancellation/correction/reversal removal
-#     clean_trace_enhanced_chunk : Main orchestration function for Enhanced TRACE
-#     """
-    
-#     if clean_combined.empty:
-#         return pd.DataFrame()
-    
-#     # Split data based on rpt_side_cd and cntra_mp_id
-#     agency_s = clean_combined[(clean_combined['rpt_side_cd'] == 'S') & 
-#                               (clean_combined['cntra_mp_id'] == 'D')].copy()
-    
-#     agency_b = clean_combined[(clean_combined['rpt_side_cd'] == 'B') & 
-#                               (clean_combined['cntra_mp_id'] == 'D')].copy()
-    
-#     customer = clean_combined[clean_combined['cntra_mp_id'] == 'C'].copy()
-    
-#     # if logger:
-#     logging.info(f"Customer trades: {len(customer)}")
-#     logging.info(f"Agency sells (inter-dealer): {len(agency_s)}")  
-#     logging.info(f"Agency buys (inter-dealer): {len(agency_b)}")
-    
-#     if remove_all_interdealer_buys:
-#         # Aggressive approach: Remove ALL inter-dealer buys       
-#         logging.info("Removing ALL inter-dealer buy records (aggressive approach)")
-#         logging.info(f"Inter-dealer buys removed: {len(agency_b)}")
-        
-#         clean_final = pd.concat([customer, agency_s], ignore_index=True)
-        
-#     else:
-#         # Conservative approach: Remove only matched inter-dealer buys (SAS default)
-#         if not agency_b.empty and not agency_s.empty:
-#             # Perform the anti-join to find unmatched agency buys
-#             # This matches the actual SAS SQL logic
-#             agency_b_merged = pd.merge(
-#                 agency_b,
-#                 agency_s[['cusip_id', 'trd_exctn_dt', 'rptd_pr', 'entrd_vol_qt']].drop_duplicates(),
-#                 on=['cusip_id', 'trd_exctn_dt', 'rptd_pr', 'entrd_vol_qt'],
-#                 how='left',
-#                 indicator='_merge'
-#             )
-            
-#             # Keep only unmatched buy records (equivalent to "having b.rpt_side_cd = ''" in SAS)
-#             agency_b_nodup = agency_b_merged[agency_b_merged['_merge'] == 'left_only'].copy()
-#             agency_b_nodup = agency_b_nodup.drop(columns=['_merge'])
-            
-            
-#             n_matched = len(agency_b) - len(agency_b_nodup)
-#             logging.info(f"Matched inter-dealer buys removed: {n_matched}")
-#             logging.info(f"Unmatched inter-dealer buys kept: {len(agency_b_nodup)}")
-            
-#             clean_final = pd.concat([customer, agency_s, agency_b_nodup], ignore_index=True)
-            
-#         else:
-#             # If either agency_s or agency_b is empty, combine what we have
-#             clean_final = pd.concat([customer, agency_s, agency_b], ignore_index=True)        
-    
-#     return clean_final
-
-
-def clean_agency_transactions(clean_combined, remove_all_interdealer_buys=False):
+    See Also
+    --------
+    clean_post_20120206 : Post-2012 cancellation/correction/reversal removal
+    clean_pre_20120206 : Pre-2012 cancellation/correction/reversal removal
+    clean_trace_enhanced_chunk : Main orchestration function for Enhanced TRACE
+    """
     
     if clean_combined.empty:
         return pd.DataFrame()
     
-    # Early exit if no dealer trades
-    if not (clean_combined['cntra_mp_id'] == 'D').any():
-        logging.info("No dealer trades, skipping agency cleaning")
-        return clean_combined
-    
-    # Split data - use views instead of copies
-    customer = clean_combined[clean_combined['cntra_mp_id'] == 'C']
+    # Split data based on rpt_side_cd and cntra_mp_id
     agency_s = clean_combined[(clean_combined['rpt_side_cd'] == 'S') & 
-                              (clean_combined['cntra_mp_id'] == 'D')]
-    agency_b = clean_combined[(clean_combined['rpt_side_cd'] == 'B') & 
-                              (clean_combined['cntra_mp_id'] == 'D')]
+                              (clean_combined['cntra_mp_id'] == 'D')].copy()
     
+    agency_b = clean_combined[(clean_combined['rpt_side_cd'] == 'B') & 
+                              (clean_combined['cntra_mp_id'] == 'D')].copy()
+    
+    customer = clean_combined[clean_combined['cntra_mp_id'] == 'C'].copy()
+    
+    # if logger:
     logging.info(f"Customer trades: {len(customer)}")
-    logging.info(f"Agency sells: {len(agency_s)}")
-    logging.info(f"Agency buys: {len(agency_b)}")
+    logging.info(f"Agency sells (inter-dealer): {len(agency_s)}")  
+    logging.info(f"Agency buys (inter-dealer): {len(agency_b)}")
     
     if remove_all_interdealer_buys:
-        logging.info("Removing ALL inter-dealer buys")
-        return pd.concat([customer, agency_s], ignore_index=True)
-    
-    # Conservative approach with hash-based matching
-    if not agency_b.empty and not agency_s.empty:
-        # Create hash keys for fast matching
-        agency_s_temp = agency_s.copy()
-        agency_b_temp = agency_b.copy()
+        # Aggressive approach: Remove ALL inter-dealer buys       
+        logging.info("Removing ALL inter-dealer buy records (aggressive approach)")
+        logging.info(f"Inter-dealer buys removed: {len(agency_b)}")
         
-        agency_s_temp['_key'] = (
-            agency_s_temp['cusip_id'].astype(str) + '|' +
-            agency_s_temp['trd_exctn_dt'].astype(str) + '|' +
-            agency_s_temp['rptd_pr'].astype(str) + '|' +
-            agency_s_temp['entrd_vol_qt'].astype(str)
-        )
+        clean_final = pd.concat([customer, agency_s], ignore_index=True)
         
-        agency_b_temp['_key'] = (
-            agency_b_temp['cusip_id'].astype(str) + '|' +
-            agency_b_temp['trd_exctn_dt'].astype(str) + '|' +
-            agency_b_temp['rptd_pr'].astype(str) + '|' +
-            agency_b_temp['entrd_vol_qt'].astype(str)
-        )
-        
-        # Fast set-based lookup
-        sell_keys = set(agency_s_temp['_key'])
-        unmatched_mask = ~agency_b_temp['_key'].isin(sell_keys)
-        
-        agency_b_nodup = agency_b_temp[unmatched_mask].drop(columns=['_key'])
-        
-        n_matched = len(agency_b) - len(agency_b_nodup)
-        logging.info(f"Matched buys removed: {n_matched}")
-        logging.info(f"Unmatched buys kept: {len(agency_b_nodup)}")
-        
-        return pd.concat([customer, agency_s, agency_b_nodup], ignore_index=True)
     else:
-        return pd.concat([customer, agency_s, agency_b], ignore_index=True)
-
+        # Conservative approach: Remove only matched inter-dealer buys (SAS default)
+        if not agency_b.empty and not agency_s.empty:
+            # Perform the anti-join to find unmatched agency buys
+            # This matches the actual SAS SQL logic
+            agency_b_merged = pd.merge(
+                agency_b,
+                agency_s[['cusip_id', 'trd_exctn_dt', 'rptd_pr', 'entrd_vol_qt']].drop_duplicates(),
+                on=['cusip_id', 'trd_exctn_dt', 'rptd_pr', 'entrd_vol_qt'],
+                how='left',
+                indicator='_merge'
+            )
+            
+            # Keep only unmatched buy records (equivalent to "having b.rpt_side_cd = ''" in SAS)
+            agency_b_nodup = agency_b_merged[agency_b_merged['_merge'] == 'left_only'].copy()
+            agency_b_nodup = agency_b_nodup.drop(columns=['_merge'])
+            
+            
+            n_matched = len(agency_b) - len(agency_b_nodup)
+            logging.info(f"Matched inter-dealer buys removed: {n_matched}")
+            logging.info(f"Unmatched inter-dealer buys kept: {len(agency_b_nodup)}")
+            
+            clean_final = pd.concat([customer, agency_s, agency_b_nodup], ignore_index=True)
+            
+        else:
+            # If either agency_s or agency_b is empty, combine what we have
+            clean_final = pd.concat([customer, agency_s, agency_b], ignore_index=True)        
+    
+    return clean_final
 # -------------------------------------------------------------------------
 def build_fisd(db, params: dict | None = None):
     """
