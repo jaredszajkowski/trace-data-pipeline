@@ -436,8 +436,8 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
         
         # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
         except FileNotFoundError:
-            logging.warning(f"Parquet file for chunk {i} not found. Retrying in 60 seconds...")
-            time.sleep(60)
+            logging.warning(f"Parquet file for chunk {i} not found. Retrying in 10 minutes...")
+            time.sleep(600)
             trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
         
         if len(trace) == 0:
