@@ -531,8 +531,8 @@ def clean_trace_data(
         args=(cusip_chunks, wrds_username),
     )
     pull_proc.start()
-    logging.info("Pull process started (PID %s). Waiting 1 minute before processing...", pull_proc.pid)
-    time.sleep(60)  # give pull a 1-minute head start
+    logging.info("Pull process started (PID %s). Waiting 15 seconds before processing...", pull_proc.pid)
+    time.sleep(15)  # give pull a 15-second head start
 
     # Read data from parquet files and process
     for i in range(0, len(cusip_chunks)):
@@ -1588,58 +1588,100 @@ def filter_by_calendar(
     return df.loc[mask].copy()
 # -------------------------------------------------------------------------
 
-def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
-    """
-    [Original docstring stays the same]
-    """
+# At module level (top of file) - computed ONCE, not every chunk
+CUTOFF_DATE = pd.Timestamp('2012-02-06')
 
-    # Convert date strings to datetime objects
-    cutoff_date = pd.to_datetime('2012-02-06')
-    
+def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
+
+    # Convert dates once
     trace['trd_exctn_dt'] = pd.to_datetime(trace['trd_exctn_dt'])
     trace['trd_rpt_dt'] = pd.to_datetime(trace['trd_rpt_dt'])
-        
-    # Split data into pre and post 2012/02/06 based on reporting date
-    post = trace[trace['trd_rpt_dt'] >= cutoff_date].copy()
-    pre  = trace[trace['trd_rpt_dt'] < cutoff_date].copy()
-    
-    # Apply additional filters for pre-2012-02-06 data
+
+    # Split into pre/post
+    post_mask = trace['trd_rpt_dt'] >= CUTOFF_DATE
+    post = trace[post_mask].copy()
+    pre = trace[~post_mask].copy()
+
+    # Apply all pre-filters in one combined mask (avoid repeated filtering)
     if not pre.empty:
-        # Convert indicators to string
-        pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].astype(str)
-        pre['wis_fl'] = pre['wis_fl'].astype(str)
-        pre['lckd_in_ind'] = pre['lckd_in_ind'].astype(str)
-        pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].astype(str)
+        # Convert all columns at once
+        for col in ['days_to_sttl_ct', 'wis_fl', 'lckd_in_ind', 'sale_cndtn_cd']:
+            pre[col] = pre[col].astype(str).replace('nan', 'None')
+
+        # Apply ALL filters in a single mask instead of 4 separate passes
+        mask = (
+            pre['days_to_sttl_ct'].isin({'000', '001', '002', 'None'}) &
+            (pre['wis_fl'] != 'Y') &
+            (pre['lckd_in_ind'] != 'Y') &
+            pre['sale_cndtn_cd'].isin({'None', '@'})
+        )
+
+        if logger:
+            before = pre
+            pre_settle    = pre[pre['days_to_sttl_ct'].isin({'000','001','002','None'})]
+            pre_wis       = pre_settle[pre_settle['wis_fl'] != 'Y']
+            pre_locked    = pre_wis[pre_wis['lckd_in_ind'] != 'Y']
+            pre_final     = pre_locked[pre_locked['sale_cndtn_cd'].isin({'None','@'})]
+            logger(before,     pre_settle, "pre_settle_<=2d",        chunk_id)
+            logger(pre_settle, pre_wis,    "pre_exclude_WIS",        chunk_id)
+            logger(pre_wis,    pre_locked, "pre_exclude_locked_in",  chunk_id)
+            logger(pre_locked, pre_final,  "pre_exclude_special_cond", chunk_id)
+            pre = pre_final
+        else:
+            pre = pre[mask]
+
+# def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
+#     """
+#     [Original docstring stays the same]
+#     """
+
+#     # Convert date strings to datetime objects
+#     cutoff_date = pd.to_datetime('2012-02-06')
+    
+#     trace['trd_exctn_dt'] = pd.to_datetime(trace['trd_exctn_dt'])
+#     trace['trd_rpt_dt'] = pd.to_datetime(trace['trd_rpt_dt'])
         
-        # Replace NaN strings with 'None'
-        pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].replace('nan', 'None')
-        pre['wis_fl'] = pre['wis_fl'].replace('nan', 'None')
-        pre['lckd_in_ind'] = pre['lckd_in_ind'].replace('nan', 'None')
-        pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].replace('nan', 'None')
+#     # Split data into pre and post 2012/02/06 based on reporting date
+#     post = trace[trace['trd_rpt_dt'] >= cutoff_date].copy()
+#     pre  = trace[trace['trd_rpt_dt'] < cutoff_date].copy()
+    
+#     # Apply additional filters for pre-2012-02-06 data
+#     if not pre.empty:
+#         # Convert indicators to string
+#         pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].astype(str)
+#         pre['wis_fl'] = pre['wis_fl'].astype(str)
+#         pre['lckd_in_ind'] = pre['lckd_in_ind'].astype(str)
+#         pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].astype(str)
         
-        # 1) <= 2-day settlement ---------------------------------------------
-        before = pre
-        pre = pre[pre['days_to_sttl_ct'].isin({'000','001','002','None'})]
-        if logger:
-            logger(before, pre, "pre_settle_<=2d", chunk_id)
+#         # Replace NaN strings with 'None'
+#         pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].replace('nan', 'None')
+#         pre['wis_fl'] = pre['wis_fl'].replace('nan', 'None')
+#         pre['lckd_in_ind'] = pre['lckd_in_ind'].replace('nan', 'None')
+#         pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].replace('nan', 'None')
+        
+#         # 1) <= 2-day settlement ---------------------------------------------
+#         before = pre
+#         pre = pre[pre['days_to_sttl_ct'].isin({'000','001','002','None'})]
+#         if logger:
+#             logger(before, pre, "pre_settle_<=2d", chunk_id)
     
-        # 2) Exclude when-issued (wis_fl == 'Y') -----------------------------
-        before = pre
-        pre = pre[pre['wis_fl'] != 'Y']
-        if logger:
-            logger(before, pre, "pre_exclude_WIS", chunk_id)
+#         # 2) Exclude when-issued (wis_fl == 'Y') -----------------------------
+#         before = pre
+#         pre = pre[pre['wis_fl'] != 'Y']
+#         if logger:
+#             logger(before, pre, "pre_exclude_WIS", chunk_id)
     
-        # 3) Exclude locked-in (lckd_in_ind == 'Y') -------------------------
-        before = pre
-        pre = pre[pre['lckd_in_ind'] != 'Y']
-        if logger:
-            logger(before, pre, "pre_exclude_locked_in", chunk_id)
+#         # 3) Exclude locked-in (lckd_in_ind == 'Y') -------------------------
+#         before = pre
+#         pre = pre[pre['lckd_in_ind'] != 'Y']
+#         if logger:
+#             logger(before, pre, "pre_exclude_locked_in", chunk_id)
     
-        # 4) Exclude special conditions (sale_cndtn_cd not in {None, @}) ----
-        before = pre
-        pre = pre[pre['sale_cndtn_cd'].isin({'None','@'})]
-        if logger:
-            logger(before, pre, "pre_exclude_special_cond", chunk_id)
+#         # 4) Exclude special conditions (sale_cndtn_cd not in {None, @}) ----
+#         before = pre
+#         pre = pre[pre['sale_cndtn_cd'].isin({'None','@'})]
+#         if logger:
+#             logger(before, pre, "pre_exclude_special_cond", chunk_id)
     
     # ========================================
     # PARALLEL: Clean pre and post simultaneously
