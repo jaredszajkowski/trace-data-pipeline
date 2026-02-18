@@ -398,7 +398,7 @@ def _pull_all_chunks(cusip_chunks, wrds_username):
     db = wrds.Connection(wrds_username=wrds_username)
     try:
         Path("./_data").mkdir(parents=True, exist_ok=True)
-        for i in range(443, len(cusip_chunks)):
+        for i in range(0, len(cusip_chunks)):
             # pull_start_time = time.time()
             logging.info(f"Retrieving chunk {i} of {len(cusip_chunks)}")
             temp_tuple = tuple(cusip_chunks[i])
@@ -426,7 +426,7 @@ def _pull_all_chunks(cusip_chunks, wrds_username):
 def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
     """Reads parquet files and runs filter 1 cleaning process."""
     # Read data from parquet files and process
-    for i in range(443, len(cusip_chunks)):
+    for i in range(0, len(cusip_chunks)):
         
         logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
         
@@ -650,7 +650,7 @@ def clean_trace_data(
     #     logging.info(f"Filter took {filter_elapsed_time} seconds")
 
     # Read data from f1 parquet files and continue with filters
-    for i in range(443, len(cusip_chunks)):
+    for i in range(0, len(cusip_chunks)):
         # Read data from f1 parquet file
         try:
             trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
