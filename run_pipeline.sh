@@ -200,45 +200,7 @@ fi
 # echo "[submit] Stage 1 pipeline (waits for stage0 reports) ..."
 # J5=$(qsub -terse -N stage1_pipeline -hold_jid ${J4} stage1/run_stage1.sh)
 
-# # Stage 0: Run Enhanced, Standard, and 144A TRACE data extraction jobs sequentially
-# echo ""
-# echo "=== STAGE 0: TRACE Data Extraction ==="
-
-# echo "[running] Enhanced TRACE ..."
-# bash stage0/run_enhanced_trace.sh > stage0/logs/trace_enhanced.log 2>&1 &
-# J1=$!
-
-# wait $J1
-# echo "[ok] Enhanced TRACE completed"
-
-# echo "[running] Standard TRACE ..."
-# bash stage0/run_standard_trace.sh > stage0/logs/trace_standard.log 2>&1 &
-# J2=$!
-
-# wait $J2
-# echo "[ok] Standard TRACE completed"
-
-# echo "[running] 144A TRACE ..."
-# bash stage0/run_144a_trace.sh > stage0/logs/trace_144a.log 2>&1 &
-# J3=$!
-
-# wait $J3
-# echo "[ok] 144A TRACE completed"
-# echo "[ok] All TRACE extraction jobs completed"
-
-# # Stage 0: Build data reports after all extraction jobs complete
-# echo "[running] Build data reports ..."
-# bash stage0/run_build_data_reports.sh > stage0/logs/build_reports.log 2>&1
-# echo "[ok] Data reports completed"
-
-# # Stage 1: Process daily aggregation after stage0 reports are ready
-# echo ""
-# echo "=== STAGE 1: Daily Aggregation & Analytics ==="
-# echo "[running] Stage 1 pipeline ..."
-# bash stage1/run_stage1.sh > stage1/logs/stage1_pipeline.log 2>&1
-# echo "[ok] Stage 1 pipeline completed"
-
-# Stage 0: Run Enhanced, Standard, and 144A TRACE data extraction jobs in parallel
+# Stage 0: Run Enhanced, Standard, and 144A TRACE data extraction jobs sequentially
 echo ""
 echo "=== STAGE 0: TRACE Data Extraction ==="
 
@@ -260,7 +222,7 @@ J3=$!
 wait $J3
 echo "[ok] 144A TRACE completed"
 
-# Wait for all three to complete
+# Wait for all three TRACE extraction jobs to complete
 echo "[waiting] Waiting for all TRACE extraction jobs..."
 wait $J1 $J2 $J3
 echo "[ok] All TRACE extraction jobs completed"
@@ -308,7 +270,7 @@ echo ""
 # echo "  Stage 2 - Advanced (waits for stage1):"
 # echo "    Stage2 Pipeline: ${J6}"
 # echo ""
-echo "Monitor jobs with: qstat"
+echo "Monitor jobs with: myq" # qstat"
 echo "Check logs in: stage0/logs/, stage1/logs/"
 echo "Downloaded data in: stage1/data/"
 echo ""
