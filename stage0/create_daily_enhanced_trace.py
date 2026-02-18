@@ -437,7 +437,7 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
         # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
         except FileNotFoundError:
             logging.warning(f"Parquet file for chunk {i} not found. Retrying in 10 minutes...")
-            time.sleep(60)
+            time.sleep(600)
             trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
         
         # If file is found but empty, export an empty f1 file and skip to next chunk
@@ -588,7 +588,7 @@ def clean_trace_data(
     )
     pull_proc.start()
     logging.info("Pull process started (PID %s). Waiting 10 minutes before proceeding...", pull_proc.pid)
-    time.sleep(60)  # give pull a 10-minute head start
+    time.sleep(600)  # give pull a 10-minute head start
 
     # process_start_time = time.time()  # Start timer for clean process
 
@@ -656,7 +656,7 @@ def clean_trace_data(
             trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
         except FileNotFoundError:
             logging.warning(f"F1 parquet file for chunk {i} not found. Retrying in 10 minutes...")
-            time.sleep(60)
+            time.sleep(600)
             trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
 
         if len(trace) == 0:
