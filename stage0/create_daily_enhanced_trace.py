@@ -652,8 +652,8 @@ def clean_trace_data(
         try:
             trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
         except FileNotFoundError:
-            logging.warning(f"F1 parquet file for chunk {i} not found. Retrying in 60 seconds...")
-            time.sleep(60)
+            logging.warning(f"F1 parquet file for chunk {i} not found. Retrying in 10 minutes...")
+            time.sleep(600)
             trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
        
         # Filter 2: Decimal Correction
