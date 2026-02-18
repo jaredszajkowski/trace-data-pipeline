@@ -439,6 +439,12 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
             logging.warning(f"Pickle file for chunk {i} not found. Retrying in 10 minutes...")
             time.sleep(600)
             trace = pd.read_pickle(f"./_data/trace_enhanced_chunk_{i}.pkl")
+
+        # Delete raw chunk file to save space
+        try:
+            Path(f"./_data/trace_enhanced_chunk_{i}.pkl").unlink()
+        except FileNotFoundError:
+            logging.warning(f"Pickle file for chunk {i} not found when attempting to delete.")
         
         # If file is found but empty, export an empty f1 file and skip to next chunk
         if len(trace) == 0:
@@ -658,6 +664,12 @@ def clean_trace_data(
             logging.warning(f"F1 pickle file for chunk {i} not found. Retrying in 10 minutes...")
             time.sleep(600)
             trace = pd.read_pickle(f"./_data/trace_enhanced_f1_{i}.pkl")
+
+        # Delete raw F1 chunk file to save space
+        try:
+            Path(f"./_data/trace_enhanced_f1_{i}.pkl").unlink()
+        except FileNotFoundError:
+            logging.warning(f"F1 pickle file for chunk {i} not found when attempting to delete.")
 
         if len(trace) == 0:
             continue
