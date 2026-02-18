@@ -44,24 +44,30 @@ Executing the pipeline is as simple as:
 3. Create the `.env` file (example provided in `.env.example`).
 4. Create `.pgpass` file for WRDS access, by running:
 
+```bash
 $ module load python/3.11.9
 $ python  
 >>> import wrds 
 >>> db = wrds.Connection() 
-Enter your WRDS username: "username” 
+Enter your WRDS username: <username> 
 Enter your WRDS password: 
 Created WRDS pgpass file 
 >>> db.close() 
 >>> exit()
+```
 
-5. Change permissions of run_pipeline.sh (if necessary):
+5. Modify the permissions of run_pipeline.sh (if necessary):
 
+```bash
 $ chmod +x run_pipeline.sh
+```
 
 5. Navigate to the project directory and run:
 
+```bash
 $ ./submit_trace_pipeline.sh
-  
+```
+
 to submit the job to SLURM and execute the pipeline.
 
 # TRACE Data Pipeline (Original README)
