@@ -436,8 +436,8 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
         
         # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
         except FileNotFoundError:
-            logging.warning(f"Parquet file for chunk {i} not found. Retrying in 15 seconds...")
-            time.sleep(15)
+            logging.warning(f"Parquet file for chunk {i} not found. Retrying in 60 seconds...")
+            time.sleep(60)
             trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
         
         if len(trace) == 0:
@@ -584,8 +584,8 @@ def clean_trace_data(
         args=(cusip_chunks, wrds_username),
     )
     pull_proc.start()
-    logging.info("Pull process started (PID %s). Waiting 15 seconds before proceeding...", pull_proc.pid)
-    time.sleep(15)  # give pull a 15-second head start
+    logging.info("Pull process started (PID %s). Waiting 10 minutes before proceeding...", pull_proc.pid)
+    time.sleep(600)  # give pull a 10-minute head start
 
     # process_start_time = time.time()  # Start timer for clean process
 
@@ -595,8 +595,8 @@ def clean_trace_data(
         args=(cusip_chunks, f, clean_agency, sort_cols),
     )
     f1_proc.start()
-    logging.info("Filter 1 cleaning process started (PID %s). Waiting 15 seconds before proceeding...", f1_proc.pid)
-    time.sleep(15)  # give f1 cleaning process a 15-second head start
+    logging.info("Filter 1 cleaning process started (PID %s). Waiting 60 seconds before proceeding...", f1_proc.pid)
+    time.sleep(60)  # give f1 cleaning process a 1-minute head start
 
     # # Read data from parquet files and process
     # for i in range(0, len(cusip_chunks)):
@@ -652,8 +652,8 @@ def clean_trace_data(
         try:
             trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
         except FileNotFoundError:
-            logging.warning(f"F1 parquet file for chunk {i} not found. Retrying in 15 seconds...")
-            time.sleep(15)
+            logging.warning(f"F1 parquet file for chunk {i} not found. Retrying in 60 seconds...")
+            time.sleep(60)
             trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
        
         # Filter 2: Decimal Correction
@@ -926,7 +926,7 @@ def clean_trace_data(
 
         # Log elapsed time for the cleaning process
         clean_elapsed_time = round((time.time() - clean_start_time) / 60, 2)
-        logging.info(f"Total elapsed time: {clean_elapsed_time} minutes")
+        logging.info(f"Total cleaning elapsed time: {clean_elapsed_time} minutes")
         # est_time_remaining = round((clean_elapsed_time / (i+1)) * (len(cusip_chunks) - (i+1)), 2)
         # logging.info(f"Estimated time remaining: {est_time_remaining} minutes")
         logging.info("-" * 50)
