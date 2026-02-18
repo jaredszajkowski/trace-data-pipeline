@@ -398,7 +398,7 @@ def _pull_all_chunks(cusip_chunks, wrds_username):
     db = wrds.Connection(wrds_username=wrds_username)
     try:
         Path("./_data").mkdir(parents=True, exist_ok=True)
-        for i in range(len(cusip_chunks)):
+        for i in range(443, len(cusip_chunks)):
             # pull_start_time = time.time()
             logging.info(f"Retrieving chunk {i} of {len(cusip_chunks)}")
             temp_tuple = tuple(cusip_chunks[i])
@@ -426,7 +426,7 @@ def _pull_all_chunks(cusip_chunks, wrds_username):
 def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
     """Reads parquet files and runs filter 1 cleaning process."""
     # Read data from parquet files and process
-    for i in range(0, len(cusip_chunks)):
+    for i in range(443, len(cusip_chunks)):
         
         logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
         
@@ -437,10 +437,13 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
         # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
         except FileNotFoundError:
             logging.warning(f"Parquet file for chunk {i} not found. Retrying in 10 minutes...")
-            time.sleep(600)
+            time.sleep(60)
             trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
         
+        # If file is found but empty, export an empty f1 file and skip to next chunk
         if len(trace) == 0:
+            trace.to_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+            logging.info(f"Chunk {i}: Filter 1 complete and exported (empty chunk)")
             continue
               
         trace["rptd_pr"] = trace["rptd_pr"].astype("float64").round(6)
@@ -585,7 +588,7 @@ def clean_trace_data(
     )
     pull_proc.start()
     logging.info("Pull process started (PID %s). Waiting 10 minutes before proceeding...", pull_proc.pid)
-    time.sleep(600)  # give pull a 10-minute head start
+    time.sleep(60)  # give pull a 10-minute head start
 
     # process_start_time = time.time()  # Start timer for clean process
 
@@ -647,14 +650,17 @@ def clean_trace_data(
     #     logging.info(f"Filter took {filter_elapsed_time} seconds")
 
     # Read data from f1 parquet files and continue with filters
-    for i in range(0, len(cusip_chunks)):
+    for i in range(443, len(cusip_chunks)):
         # Read data from f1 parquet file
         try:
             trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
         except FileNotFoundError:
             logging.warning(f"F1 parquet file for chunk {i} not found. Retrying in 10 minutes...")
-            time.sleep(600)
+            time.sleep(60)
             trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+
+        if len(trace) == 0:
+            continue
        
         # Filter 2: Decimal Correction
         # temp_filter_time = time.time()  # Start timer for filter
