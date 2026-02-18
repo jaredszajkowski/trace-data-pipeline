@@ -1,4 +1,35 @@
-# TRACE Data Pipeline
+Below is the original README for the [TRACE Data Pipeline](https://github.com/Alexander-M-Dickerson/trace-data-pipeline) project, a comprehensive pipeline for processing TRACE corporate bond transaction data.
+
+The motivation for this fork is to run the pipeline on a SLURM cluster, specifically, [The Unversity of Chicago's Research Computing Center](https://rcc.uchicago.edu/) Midway3 cluster.
+
+This fork modifies the original repository in the following ways:
+
+### `main` Branch
+
+* Logging for the length of time required for each filter in the `clean_trace_data` function. This logging led to the modifications made to the `multiprocess_clean-pull-f1-f1pre-f1post` branch.
+* The `run_pipeline.sh` script has been modified as follows:
+  1) The disk capacity check has been disabled.
+  2) The "qsub" sections have been removed and replaced with "wait" bash commands for the stage 0 and stage 1 dependencies.
+* The required `sbatch` file for scheduling on SLURM.
+
+### `multiprocess_clean-pull-f1-f1pre-f1post` Branch
+
+* The `_pull_all_chunks` function pulls all chunk data from WRDS sequentially and exports each chunk to a parquet file.
+* The `_f1_proc` function reads the parquet files from above, runs the initial cleaning and Filter 1: Dick-Nielsen, and exports the resulting `trace` DataFrame as a parquet file, individually for each chunk.
+* Subsequently, the `clean_trace_data` function reads the parquet files from above, and runs the remaining filters.
+* Within the `clean_trace_data` function, multiprocessing is introduced for the pulling of data from WRDS and the Filter 1: Dick-Nielsen, in order to run the processes in parallel. There are 5 CPUs required to take advantage of the multiprocessing, which are allocated as follows:
+  1) Initial execution of `run_pipeline.sh`, then focused on the `clean_trace_data` function.
+  2) `_pull_all_chunks` function (within the `clean_trace_data` function).
+  3) `_f1_proc` function (within the `clean_trace_data` function).
+  4) `clean_post_20120206` function (within the `clean_trace_chunk` function which is within the `_f1_proc` function).
+  5) `clean_pre_20120206` function (within the `clean_trace_chunk` function which is within the `_f1_proc` function).
+* The `run_pipeline.sh` script has been modified as follows:
+  1) The disk capacity check has been disabled.
+  2) The "qsub" sections have been removed and replaced with "wait" bash commands for the stage 0 and stage 1 dependencies.
+* The required `sbatch` file for scheduling on SLURM.
+<!-- * Separates the original `run_pipeline.sh` into two scripts: `run_pipeline_stage0_partA.sh` and `run_pipeline_stage0_partB_stage1.sh`, allowing for job dependencies to be set up in the `sbatch` files -->
+
+# TRACE Data Pipeline (Original README)
 
 A comprehensive, pipeline for processing Enhanced, Standard and 144A TRACE (Trade Reporting and Compliance Engine) corporate bond transaction data. 
 It is apart of the [Open Bond Asset Pricing project](https://openbondassetpricing.com/).
