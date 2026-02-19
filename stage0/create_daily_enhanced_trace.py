@@ -416,7 +416,11 @@ def _pull_all_chunks(cusip_chunks, wrds_username):
             ''', params=parm)
 
             # Export to parquet file
-            trace.to_pickle(f"./_data/trace_enhanced_chunk_{i}.pkl")
+            trace.to_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
+            
+            # Sleep for 3 seconds between pulls to be polite to WRDS and reduce chance of timeouts and parquet errors
+            time.sleep(3)
+
             logging.info(f"Chunk {i}: Retrieved and exported {len(trace)} rows from WRDS")
             # retrieval_elapsed_time = round(time.time() - pull_start_time, 2)
             # logging.info(f"Chunk {i}: Data retrieval took {retrieval_elapsed_time} seconds")
@@ -432,23 +436,23 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
         
         # Read data from chunk parquet file
         try:
-            trace = pd.read_pickle(f"./_data/trace_enhanced_chunk_{i}.pkl")
+            trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
         
         # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
         except FileNotFoundError:
-            logging.warning(f"Pickle file for chunk {i} not found. Retrying in 10 minutes...")
+            logging.warning(f"Parquet file for chunk {i} not found. Retrying in 10 minutes...")
             time.sleep(600)
-            trace = pd.read_pickle(f"./_data/trace_enhanced_chunk_{i}.pkl")
+            trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
 
         # Delete raw chunk file to save space
         try:
-            Path(f"./_data/trace_enhanced_chunk_{i}.pkl").unlink()
+            Path(f"./_data/trace_enhanced_chunk_{i}.parquet").unlink()
         except FileNotFoundError:
-            logging.warning(f"Pickle file for chunk {i} not found when attempting to delete.")
+            logging.warning(f"Parquet file for chunk {i} not found when attempting to delete.")
         
         # If file is found but empty, export an empty f1 file and skip to next chunk
         if len(trace) == 0:
-            trace.to_pickle(f"./_data/trace_enhanced_f1_{i}.pkl")
+            trace.to_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
             logging.info(f"Chunk {i}: Filter 1 complete and exported (empty chunk)")
             continue
               
@@ -478,8 +482,12 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
         # Pre decimal sort #
         trace = trace.sort_values(sort_cols, kind="mergesort", ignore_index=True)
 
-        # Export to pickle file
-        trace.to_pickle(f"./_data/trace_enhanced_f1_{i}.pkl")
+        # Export to parquet file
+        trace.to_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+
+        # Sleep for 3 seconds to reduce chance of parquet errors
+        time.sleep(3)
+
         logging.info(f"Chunk {i}: Filter 1 complete and exported")
 
         # Log filter time
@@ -612,15 +620,15 @@ def clean_trace_data(
         
     #     logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
         
-    #     # Read data from pickle file with chunk data
+    #     # Read data from parquet file with chunk data
     #     try:
-    #         trace = pd.read_pickle(f"./_data/trace_enhanced_chunk_{i}.pkl")
+    #         trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
         
     #     # If file can't be found, wait a bit and try again (handles potential race condition with WRDS retrieval loop)
     #     except FileNotFoundError:
-    #         logging.warning(f"Pickle file for chunk {i} not found. Retrying in 15 seconds...")
+    #         logging.warning(f"Parquet file for chunk {i} not found. Retrying in 15 seconds...")
     #         time.sleep(15)
-    #         trace = pd.read_pickle(f"./_data/trace_enhanced_chunk_{i}.pkl")
+    #         trace = pd.read_parquet(f"./_data/trace_enhanced_chunk_{i}.parquet")
         
     #     if len(trace) == 0:
     #         continue
@@ -659,17 +667,17 @@ def clean_trace_data(
     for i in range(0, len(cusip_chunks)):
         # Read data from f1 pickle file
         try:
-            trace = pd.read_pickle(f"./_data/trace_enhanced_f1_{i}.pkl")
+            trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
         except FileNotFoundError:
-            logging.warning(f"F1 pickle file for chunk {i} not found. Retrying in 10 minutes...")
+            logging.warning(f"F1 parquet file for chunk {i} not found. Retrying in 10 minutes...")
             time.sleep(600)
-            trace = pd.read_pickle(f"./_data/trace_enhanced_f1_{i}.pkl")
+            trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
 
         # Delete raw F1 chunk file to save space
         try:
-            Path(f"./_data/trace_enhanced_f1_{i}.pkl").unlink()
+            Path(f"./_data/trace_enhanced_f1_{i}.parquet").unlink()
         except FileNotFoundError:
-            logging.warning(f"F1 pickle file for chunk {i} not found when attempting to delete.")
+            logging.warning(f"F1 parquet file for chunk {i} not found when attempting to delete.")
 
         if len(trace) == 0:
             continue
