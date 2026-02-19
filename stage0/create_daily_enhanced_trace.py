@@ -390,6 +390,9 @@ def compute_trace_all_metrics(trace):
     merged = merged.sort_values(['cusip_id','trd_exctn_dt']).reset_index(drop=True)
     return merged
 # -------------------------------------------------------------------------
+
+TEST_RANGE = 442
+
 def _pull_all_chunks(cusip_chunks, wrds_username):
     """Pull WRDS data for each CUSIP chunk and write to parquet files.
 
@@ -398,7 +401,7 @@ def _pull_all_chunks(cusip_chunks, wrds_username):
     db = wrds.Connection(wrds_username=wrds_username)
     try:
         Path("./_data").mkdir(parents=True, exist_ok=True)
-        for i in range(0, len(cusip_chunks)):
+        for i in range(TEST_RANGE, len(cusip_chunks)):
             # pull_start_time = time.time()
             logging.info(f"Retrieving chunk {i} of {len(cusip_chunks)}")
             temp_tuple = tuple(cusip_chunks[i])
@@ -430,7 +433,7 @@ def _pull_all_chunks(cusip_chunks, wrds_username):
 def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
     """Reads parquet files and runs filter 1 cleaning process."""
     # Read data from parquet files and process
-    for i in range(0, len(cusip_chunks)):
+    for i in range(TEST_RANGE, len(cusip_chunks)):
         
         logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")
 
@@ -674,7 +677,7 @@ def clean_trace_data(
     #     filter_elapsed_time = round(time.time() - temp_filter_time, 2)
     #     logging.info(f"Filter took {filter_elapsed_time} seconds")
 
-    for i in range(0, len(cusip_chunks)):
+    for i in range(TEST_RANGE, len(cusip_chunks)):
         # Read data from f1 parquet files, delete the f1 file,
         # and continue with filters
         try:
