@@ -432,7 +432,12 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
     # Read data from parquet files and process
     for i in range(0, len(cusip_chunks)):
         
-        logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
+        logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")
+
+        # Create new audit_records and ct_audit_records for this chunk
+        global audit_records, ct_audit_records
+        audit_records    = []
+        ct_audit_records = []
         
         # Read data from chunk parquet file
         try:
@@ -453,6 +458,8 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
         # If file is found but empty, export an empty f1 file and skip to next chunk
         if len(trace) == 0:
             trace.to_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+            pd.DataFrame(audit_records).to_parquet(f"./_data/trace_enhanced_audit_{i}.parquet")
+            pd.DataFrame(ct_audit_records).to_parquet(f"./_data/trace_enhanced_ct_audit_{i}.parquet")
             logging.info(f"Chunk {i}: Filter 1 complete and exported (empty chunk)")
             continue
               
@@ -482,8 +489,12 @@ def _f1_proc(cusip_chunks, f, clean_agency, sort_cols):
         # Pre decimal sort #
         trace = trace.sort_values(sort_cols, kind="mergesort", ignore_index=True)
 
-        # Export to parquet file
+        # Export trace DataFrame to parquet file
         trace.to_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+
+        # Export audit_records and ct_audit_records lists to parquet files
+        pd.DataFrame(audit_records).to_parquet(f"./_data/trace_enhanced_audit_{i}.parquet")
+        pd.DataFrame(ct_audit_records).to_parquet(f"./_data/trace_enhanced_ct_audit_{i}.parquet")
 
         # Sleep for 3 seconds to reduce chance of parquet errors
         time.sleep(3)
@@ -663,21 +674,32 @@ def clean_trace_data(
     #     filter_elapsed_time = round(time.time() - temp_filter_time, 2)
     #     logging.info(f"Filter took {filter_elapsed_time} seconds")
 
-    # Read data from f1 pickle files and continue with filters
     for i in range(0, len(cusip_chunks)):
-        # Read data from f1 pickle file
+        # Read data from f1 parquet files, delete the f1 file,
+        # and continue with filters
         try:
             trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
+            Path(f"./_data/trace_enhanced_f1_{i}.parquet").unlink()
         except FileNotFoundError:
             logging.warning(f"F1 parquet file for chunk {i} not found. Retrying in 10 minutes...")
             time.sleep(600)
             trace = pd.read_parquet(f"./_data/trace_enhanced_f1_{i}.parquet")
-
-        # Delete raw F1 chunk file to save space
-        try:
             Path(f"./_data/trace_enhanced_f1_{i}.parquet").unlink()
+
+        # Read f1 audit records written by the child process and merge into the
+        # parent's global lists, then delete the temporary files
+        try:
+            _f1_audit = pd.read_parquet(f"./_data/trace_enhanced_audit_{i}.parquet")
+            audit_records.extend(_f1_audit.to_dict("records"))
+            Path(f"./_data/trace_enhanced_audit_{i}.parquet").unlink()
         except FileNotFoundError:
-            logging.warning(f"F1 parquet file for chunk {i} not found when attempting to delete.")
+            logging.warning(f"F1 audit parquet file for chunk {i} not found.")
+        try:
+            _f1_ct_audit = pd.read_parquet(f"./_data/trace_enhanced_ct_audit_{i}.parquet")
+            ct_audit_records.extend(_f1_ct_audit.to_dict("records"))
+            Path(f"./_data/trace_enhanced_ct_audit_{i}.parquet").unlink()
+        except FileNotFoundError:
+            logging.warning(f"F1 ct_audit parquet file for chunk {i} not found.")
 
         if len(trace) == 0:
             continue
