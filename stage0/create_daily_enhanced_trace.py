@@ -390,6 +390,8 @@ def compute_trace_all_metrics(trace):
     merged = merged.sort_values(['cusip_id','trd_exctn_dt']).reset_index(drop=True)
     return merged    
 # -------------------------------------------------------------------------
+TEST_RANGE = 442
+
 def clean_trace_data(
     db,
     cusip_chunks,
@@ -490,7 +492,7 @@ def clean_trace_data(
     
     clean_start_time = time.time()  # Start total timer for cleaning process
     
-    for i in range(0, len(cusip_chunks)):  
+    for i in range(TEST_RANGE, len(cusip_chunks)):  
         start_time = time.time()  # Start timer
         # logging.info(f"Processing chunk {i+1} of {len(cusip_chunks)}")        
         logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")        
