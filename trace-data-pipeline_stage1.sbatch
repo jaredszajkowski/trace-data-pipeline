@@ -4,7 +4,7 @@
 #SBATCH --error=%j_trace-data-pipeline-stage1.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=3
 #SBATCH --mem-per-cpu=16000
 #SBATCH --partition=build
 #SBATCH --time=6:00:00
