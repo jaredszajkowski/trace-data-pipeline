@@ -18,6 +18,10 @@ This fork modifies the original repository in the following ways:
 * The required `sbatch` file for scheduling on SLURM.
 * The script to submit the `sbatch` file to SLURM.
 
+Additional notes:
+
+* Executing the `main` branch pipeline on the Midway3 "build" partition will result in failure due to the 6 hour wall time limit imposed by the build partition.
+
 ### `multiprocess` Branch
 
 The `multiprocess` branch includes the above changes to the `main` branch, and the following additional modifications to introduce multiprocessing:
