@@ -49,7 +49,8 @@ Executing the pipeline is as simple as:
 1. Login to RCC.
 2. Clone the repository to your home directory.
 3. Create the `.env` file (example provided in `.env.example`).
-4. Create `.pgpass` file for WRDS access, by running:
+4. Create virtual environment and install dependencies (if not using the virtual environment provided in the `sbatch` files).
+5. Create `.pgpass` file for WRDS access, by running:
 
 ```bash
 $ module load python/3.11.9
@@ -63,31 +64,31 @@ Created WRDS pgpass file
 >>> exit()
 ```
 
-5. Modify the permissions of run_pipeline.sh (if necessary):
+6. Checkout the `main` or `multiprocess` branch (based on use case above):
 
 ```bash
-$ chmod +x run_pipeline.sh
+$ git checkout main # or multiprocess
 ```
 
-6. Navigate to the project directory and run the following to to submit the job to SLURM and execute the pipeline:
+7. Navigate to the project directory and run the following to to submit the job to SLURM and execute the pipeline:
 
 ```bash
 $ ./submit_trace_pipeline.sh
 ```
 
-7. Check the status of the job with:
+8. Check the status of the job with:
 
 ```bash
 $ myq
 ```
 
-8. To follow the output of the individual log files for each process in the `stage0/logs/` directory, use the following command:
+9. To follow the output of the individual log files for each process in the `stage0/logs/` directory, use the following command:
 
 ```bash
 $ tail -f stage0/logs/trace_enhanced.log # or trace_standard.log or trace_144a.log
 ```
 
-9. To view the complete log file during or after the process has completed, use the following command:
+10. To view the complete log file during or after the process has completed, use the following command:
 
 ```bash
 $ less stage0/logs/trace_enhanced.log # or trace_standard.log or trace_144a.log
