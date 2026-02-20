@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=trace-data-pipeline
-#SBATCH --output=%j_trace-data-pipeline.out
-#SBATCH --error=%j_trace-data-pipeline.err
+#SBATCH --job-name=trace-data-pipeline-stage1
+#SBATCH --output=%j_trace-data-pipeline-stage1.out
+#SBATCH --error=%j_trace-data-pipeline-stage1.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=5
-#SBATCH --mem-per-cpu=8000
+#SBATCH --cpus-per-task=2
+#SBATCH --mem-per-cpu=16000
 #SBATCH --partition=build
 #SBATCH --time=6:00:00
 #SBATCH --account=finm32900
@@ -19,5 +19,5 @@ source /project/finm32900/tdp-venv-p3119/bin/activate
 echo "Activated virtual environment"
 
 # Run the pipeline
-echo "Executing pipeline"
-./run_pipeline.sh
+echo "Executing stage 1 pipeline"
+./run_pipeline_stage1.sh

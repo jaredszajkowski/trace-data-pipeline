@@ -21,13 +21,13 @@ if [ -z "$SLURM_EMAIL" ]; then
 fi
 
 # Submit job with email parameter
-sbatch --mail-type=ALL --mail-user=${SLURM_EMAIL} trace-data-pipeline.sbatch
+# sbatch --mail-type=ALL --mail-user=${SLURM_EMAIL} trace-data-pipeline.sbatch
 
-# STAGE 0 Part A: TRACE Enhanced, Standard, 144A Data Extraction
-# JOB1=$(sbatch --parsable --mail-type=ALL --mail-user=${SLURM_EMAIL} trace-data-pipeline_stage0_partA.sbatch)
-# echo "STAGE 0 Part A: TRACE Enhanced, Standard, 144A Data Extraction: $JOB1"
+# Stage 0: Submit Enhanced, Standard, and 144A TRACE data extraction jobs
+# Stage 0: Build data reports after all extraction jobs complete
+JOB1=$(sbatch --parsable --mail-type=ALL --mail-user=${SLURM_EMAIL} trace-data-pipeline_stage0.sbatch)
+echo "Stage 0: $JOB1"
 
-# STAGE 0 Part B: TRACE Enhanced Process, Build Data Reports
-# STAGE 1: Daily Aggregation & Analytics
-# JOB2=$(sbatch --parsable --dependency=afterok:$JOB1 --mail-type=ALL --mail-user=${SLURM_EMAIL} trace-data-pipeline_stage0_partB_stage1.sbatch)
-# echo "STAGE 0 Part B: TRACE Enhanced Process, Build Data Reports and STAGE 1: Daily Aggregation & Analytics: $JOB2 (depends on $JOB1)"
+# Stage 1: Process daily aggregation after stage0 reports are ready
+JOB2=$(sbatch --parsable --dependency=afterok:$JOB1 --mail-type=ALL --mail-user=${SLURM_EMAIL} trace-data-pipeline_stage1.sbatch)
+echo "Stage 1: $JOB2 (depends on $JOB1)"

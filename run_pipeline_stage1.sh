@@ -101,81 +101,81 @@ fi
 # fi
 # echo ""
 
-# Create log directories for all stages
-echo "[setup] Creating log directories..."
-mkdir -p stage0/logs
-mkdir -p stage1/logs
-mkdir -p stage1/data
+# # Create log directories for all stages
+# echo "[setup] Creating log directories..."
+# mkdir -p stage0/logs
+# mkdir -p stage1/logs
+# mkdir -p stage1/data
 
-# Download required data files for Stage 1 (WRDS compute nodes have no internet)
-# This must be done on the login node before submitting jobs
-echo ""
-echo "=== PRE-STAGE: Downloading Required Data Files ==="
-echo "[download] Liu-Wu treasury yields..."
-wget -q -O stage1/data/liu_wu_yields.xlsx \
-    "https://docs.google.com/spreadsheets/d/11HsxLl_u2tBNt3FyN5iXGsIKLwxvVz7t/export?format=xlsx&id=11HsxLl_u2tBNt3FyN5iXGsIKLwxvVz7t" \
-    && echo "[ok] Liu-Wu yields downloaded" \
-    || echo "[warn] Failed to download Liu-Wu yields (may already exist)"
+# # Download required data files for Stage 1 (WRDS compute nodes have no internet)
+# # This must be done on the login node before submitting jobs
+# echo ""
+# echo "=== PRE-STAGE: Downloading Required Data Files ==="
+# echo "[download] Liu-Wu treasury yields..."
+# wget -q -O stage1/data/liu_wu_yields.xlsx \
+#     "https://docs.google.com/spreadsheets/d/11HsxLl_u2tBNt3FyN5iXGsIKLwxvVz7t/export?format=xlsx&id=11HsxLl_u2tBNt3FyN5iXGsIKLwxvVz7t" \
+#     && echo "[ok] Liu-Wu yields downloaded" \
+#     || echo "[warn] Failed to download Liu-Wu yields (may already exist)"
 
-echo "[download] OSBAP Linker file..."
-wget -q -O stage1/data/linker_file_2025.zip \
-    "https://openbondassetpricing.com/wp-content/uploads/2025/11/linker_file_2025.zip" \
-    && echo "[ok] OSBAP Linker downloaded" \
-    || echo "[warn] Failed to download OSBAP Linker (may already exist)"
+# echo "[download] OSBAP Linker file..."
+# wget -q -O stage1/data/linker_file_2025.zip \
+#     "https://openbondassetpricing.com/wp-content/uploads/2025/11/linker_file_2025.zip" \
+#     && echo "[ok] OSBAP Linker downloaded" \
+#     || echo "[warn] Failed to download OSBAP Linker (may already exist)"
 
-if [[ -f "stage1/data/linker_file_2025.zip" ]]; then
-    echo "[extract] Unzipping OSBAP Linker..."
-    unzip -q -o stage1/data/linker_file_2025.zip -d stage1/data/ \
-        && echo "[ok] OSBAP Linker extracted" \
-        || echo "[warn] Failed to extract OSBAP Linker"
-    rm -f stage1/data/linker_file_2025.zip
-fi
+# if [[ -f "stage1/data/linker_file_2025.zip" ]]; then
+#     echo "[extract] Unzipping OSBAP Linker..."
+#     unzip -q -o stage1/data/linker_file_2025.zip -d stage1/data/ \
+#         && echo "[ok] OSBAP Linker extracted" \
+#         || echo "[warn] Failed to extract OSBAP Linker"
+#     rm -f stage1/data/linker_file_2025.zip
+# fi
 
-echo "[download] Fama-French 17 Industry Classification..."
-wget -q -O stage1/data/Siccodes17.zip \
-    "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Siccodes17.zip" \
-    && echo "[ok] FF17 downloaded" \
-    || echo "[warn] Failed to download FF17 (may already exist)"
+# echo "[download] Fama-French 17 Industry Classification..."
+# wget -q -O stage1/data/Siccodes17.zip \
+#     "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Siccodes17.zip" \
+#     && echo "[ok] FF17 downloaded" \
+#     || echo "[warn] Failed to download FF17 (may already exist)"
 
-if [[ -f "stage1/data/Siccodes17.zip" ]]; then
-    echo "[extract] Unzipping FF17..."
-    unzip -q -o stage1/data/Siccodes17.zip -d stage1/data/ \
-        && echo "[ok] FF17 extracted" \
-        || echo "[warn] Failed to extract FF17"
-    rm -f stage1/data/Siccodes17.zip
-fi
+# if [[ -f "stage1/data/Siccodes17.zip" ]]; then
+#     echo "[extract] Unzipping FF17..."
+#     unzip -q -o stage1/data/Siccodes17.zip -d stage1/data/ \
+#         && echo "[ok] FF17 extracted" \
+#         || echo "[warn] Failed to extract FF17"
+#     rm -f stage1/data/Siccodes17.zip
+# fi
 
-echo "[download] Fama-French 30 Industry Classification..."
-wget -q -O stage1/data/Siccodes30.zip \
-    "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Siccodes30.zip" \
-    && echo "[ok] FF30 downloaded" \
-    || echo "[warn] Failed to download FF30 (may already exist)"
+# echo "[download] Fama-French 30 Industry Classification..."
+# wget -q -O stage1/data/Siccodes30.zip \
+#     "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Siccodes30.zip" \
+#     && echo "[ok] FF30 downloaded" \
+#     || echo "[warn] Failed to download FF30 (may already exist)"
 
-if [[ -f "stage1/data/Siccodes30.zip" ]]; then
-    echo "[extract] Unzipping FF30..."
-    unzip -q -o stage1/data/Siccodes30.zip -d stage1/data/ \
-        && echo "[ok] FF30 extracted" \
-        || echo "[warn] Failed to extract FF30"
-    rm -f stage1/data/Siccodes30.zip
-fi
+# if [[ -f "stage1/data/Siccodes30.zip" ]]; then
+#     echo "[extract] Unzipping FF30..."
+#     unzip -q -o stage1/data/Siccodes30.zip -d stage1/data/ \
+#         && echo "[ok] FF30 extracted" \
+#         || echo "[warn] Failed to extract FF30"
+#     rm -f stage1/data/Siccodes30.zip
+# fi
 
-echo "[verify] Checking downloaded files..."
-MISSING_FILES=0
-for file in "liu_wu_yields.xlsx" "OSBAP_Linker_October_2025.parquet" "Siccodes17.txt" "Siccodes30.txt"; do
-    if [[ -f "stage1/data/$file" ]]; then
-        echo "[ok] $file"
-    else
-        echo "[error] Missing: $file"
-        MISSING_FILES=$((MISSING_FILES + 1))
-    fi
-done
+# echo "[verify] Checking downloaded files..."
+# MISSING_FILES=0
+# for file in "liu_wu_yields.xlsx" "OSBAP_Linker_October_2025.parquet" "Siccodes17.txt" "Siccodes30.txt"; do
+#     if [[ -f "stage1/data/$file" ]]; then
+#         echo "[ok] $file"
+#     else
+#         echo "[error] Missing: $file"
+#         MISSING_FILES=$((MISSING_FILES + 1))
+#     fi
+# done
 
-if [[ $MISSING_FILES -gt 0 ]]; then
-    echo "[warn] Some files are missing. Stage 1 may fail."
-    echo "[warn] You can manually download them following stage1/QUICKSTART_stage1.md"
-else
-    echo "[ok] All required data files present"
-fi
+# if [[ $MISSING_FILES -gt 0 ]]; then
+#     echo "[warn] Some files are missing. Stage 1 may fail."
+#     echo "[warn] You can manually download them following stage1/QUICKSTART_stage1.md"
+# else
+#     echo "[ok] All required data files present"
+# fi
 
 # # Stage 0: Submit Enhanced, Standard, and 144A TRACE data extraction jobs
 # # These run in parallel and use the stage0 directory as working directory
@@ -200,40 +200,40 @@ fi
 # echo "[submit] Stage 1 pipeline (waits for stage0 reports) ..."
 # J5=$(qsub -terse -N stage1_pipeline -hold_jid ${J4} stage1/run_stage1.sh)
 
-# Stage 0: Submit Enhanced, Standard, and 144A TRACE data extraction jobs
-# These run in parallel and use the stage0 directory as working directory
-echo ""
-echo "=== STAGE 0: TRACE Data Extraction ==="
+# # Stage 0: Submit Enhanced, Standard, and 144A TRACE data extraction jobs
+# # These run in parallel and use the stage0 directory as working directory
+# echo ""
+# echo "=== STAGE 0: TRACE Data Extraction ==="
 
-echo "[running] Enhanced TRACE ..."
-bash stage0/run_enhanced_trace.sh > stage0/logs/trace_enhanced.log 2>&1 &
-J1=$!
-# wait $J1
-# echo "[ok] Enhanced TRACE completed"
+# echo "[running] Enhanced TRACE ..."
+# bash stage0/run_enhanced_trace.sh > stage0/logs/trace_enhanced.log 2>&1 &
+# J1=$!
+# # wait $J1
+# # echo "[ok] Enhanced TRACE completed"
 
-echo "[running] Standard TRACE ..."
-bash stage0/run_standard_trace.sh > stage0/logs/trace_standard.log 2>&1 &
-J2=$!
-# wait $J2
-# echo "[ok] Standard TRACE completed"
+# echo "[running] Standard TRACE ..."
+# bash stage0/run_standard_trace.sh > stage0/logs/trace_standard.log 2>&1 &
+# J2=$!
+# # wait $J2
+# # echo "[ok] Standard TRACE completed"
 
-echo "[running] 144A TRACE ..."
-bash stage0/run_144a_trace.sh > stage0/logs/trace_144a.log 2>&1 &
-J3=$!
-# wait $J3
-# echo "[ok] 144A TRACE completed"
+# echo "[running] 144A TRACE ..."
+# bash stage0/run_144a_trace.sh > stage0/logs/trace_144a.log 2>&1 &
+# J3=$!
+# # wait $J3
+# # echo "[ok] 144A TRACE completed"
 
-# Wait for all three TRACE extraction jobs to complete
-echo "[waiting] Waiting for all TRACE extraction jobs..."
-wait $J1 $J2 $J3
-echo "[ok] All TRACE extraction jobs completed"
+# # Wait for all three TRACE extraction jobs to complete
+# echo "[waiting] Waiting for all TRACE extraction jobs..."
+# wait $J1 $J2 $J3
+# echo "[ok] All TRACE extraction jobs completed"
 
-# Stage 0: Build data reports after all extraction jobs complete
-echo "[running] Build data reports ..."
-bash stage0/run_build_data_reports.sh > stage0/logs/build_reports.log 2>&1 &
-J4=$!
-wait $J4
-echo "[ok] Data reports completed"
+# # Stage 0: Build data reports after all extraction jobs complete
+# echo "[running] Build data reports ..."
+# bash stage0/run_build_data_reports.sh > stage0/logs/build_reports.log 2>&1 &
+# J4=$!
+# wait $J4
+# echo "[ok] Data reports completed"
 
 # Stage 1: Process daily aggregation after stage0 reports are ready
 echo ""
@@ -254,17 +254,17 @@ echo "[ok] Stage 1 pipeline completed"
 # Summary
 echo ""
 echo "=== SUBMISSION COMPLETE ==="
-echo "[ok] Pre-stage data downloads completed"
-echo "[ok] All jobs submitted with dependencies:"
-echo ""
-echo "  Stage 0 - Data Extraction (parallel):"
-echo "    Enhanced TRACE: ${J1}"
-echo "    Standard TRACE: ${J2}"
-echo "    144A TRACE:     ${J3}"
-echo ""
-echo "  Stage 0 - Reports (waits for data):"
-echo "    Build Reports:  ${J4}"
-echo ""
+# echo "[ok] Pre-stage data downloads completed"
+# echo "[ok] All jobs submitted with dependencies:"
+# echo ""
+# echo "  Stage 0 - Data Extraction (parallel):"
+# echo "    Enhanced TRACE: ${J1}"
+# echo "    Standard TRACE: ${J2}"
+# echo "    144A TRACE:     ${J3}"
+# echo ""
+# echo "  Stage 0 - Reports (waits for data):"
+# echo "    Build Reports:  ${J4}"
+# echo ""
 echo "  Stage 1 - Analytics (waits for reports):"
 echo "    Daily Pipeline: ${J5}"
 echo ""
