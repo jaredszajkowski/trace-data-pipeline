@@ -1695,7 +1695,56 @@ def filter_by_calendar(
 # -------------------------------------------------------------------------
 def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
     """
-    [Original docstring stays the same]
+    Clean one chunk of Enhanced TRACE trades and returns a filtered DataFrame.
+    This routine applies date cutoffs, status and condition filters, duplicate
+    handling, and optional agency de-duplication. It is designed to be called
+    inside a loop over CUSIP chunks prior to any decimal-shift or bounce-back
+    logic.
+
+    What it does
+    ------------
+    - Ensures datetime types for report and execution timestamps.
+    - Drops rows with missing or empty cusip_id.
+    - Splits the data at the regulatory change on 2012-02-06:
+      * pre segment: applies legacy filters and explicit cancel and correction handling.
+      * post segment: applies the updated filters using the newer status fields.
+    - Reconciles cancels and corrections within the pre segment using key-based matching.
+    - Optionally removes agency duplicate prints if clean_agency is True.
+    - Re-combines pre and post segments and returns the cleaned result.
+
+    Parameters
+    ----------
+    trace : pandas.DataFrame
+        Raw Enhanced TRACE rows for a set of CUSIPs. Expected columns follow the
+        standard TRACE schema, for example:
+        cusip_id, trd_exctn_dt, trd_exctn_tm, trd_rpt_dt, trd_rpt_tm,
+        msg_seq_nb, orig_msg_seq_nb, trc_st, asof_cd, sale_cndtn_cd,
+        lckd_in_ind, wis_fl, rpt_side_cd, entrd_vol_qt, rptd_pr, yld_pt.
+        Additional columns are passed through unchanged.
+    chunk_id : int or None, optional
+        Identifier used in logs and audit trails for this chunk.
+    clean_agency : bool, default True
+        If True, apply the agency de-duplication pass at the end.
+    logger : callable or None, optional
+        Function used to append one audit row per stage. It will be called as:
+            logger(df_before, df_after, stage="stage_name", chunk_id=chunk_id)
+        Suggested stage names include:
+            "base_filters", "pre_rules", "post_rules",
+            "cancels_corrections", "agency_cleaning".
+
+    Returns
+    -------
+    pandas.DataFrame
+        Cleaned TRACE rows for the input chunk. The return is a new DataFrame
+        and the input is not modified in place.
+
+    Notes
+    -----
+    - Sorting and index are not guaranteed; callers commonly re-sort by
+      cusip_id, trd_exctn_dt, trd_exctn_tm after downstream merges.
+    - If the input is empty, an empty DataFrame is returned.
+    - The exact list of filters mirrors the commonly used academic cleaning
+      conventions around the 2012-02-06 transition date.
     """
 
     # Convert date strings to datetime objects
@@ -1746,27 +1795,13 @@ def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
         if logger:
             logger(before, pre, "pre_exclude_special_cond", chunk_id)
     
-    # ========================================
-    # PARALLEL: Clean pre and post simultaneously
-    # ========================================
-    
-    with Pool(processes=2) as pool:
-        # Submit both tasks
-        post_future = pool.apply_async(
-            clean_post_20120206, 
-            (post,), 
-            {'chunk_id': chunk_id, 'logger': log_ct_filter}
-        ) if not post.empty else None
-        
-        pre_future = pool.apply_async(
-            clean_pre_20120206, 
-            (pre,), 
-            {'chunk_id': chunk_id, 'logger': log_ct_filter}
-        ) if not pre.empty else None
-        
-        # Collect results
-        clean_post = post_future.get() if post_future else pd.DataFrame()
-        clean_pre = pre_future.get() if pre_future else pd.DataFrame()
+    # Clean Post 2012/02/06 data
+    clean_post = clean_post_20120206(post,
+      chunk_id=chunk_id,logger=log_ct_filter) if not post.empty else pd.DataFrame()
+    # 38628-37057
+    # Clean Pre 2012/02/06 data
+    clean_pre = clean_pre_20120206(pre,
+      chunk_id=chunk_id,logger=log_ct_filter ) if not pre.empty else pd.DataFrame()
     
     # Combine pre and post data
     clean_combined = pd.concat([clean_pre, clean_post], ignore_index=True)
@@ -1781,6 +1816,95 @@ def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
         clean_final = clean_combined  
     
     return clean_final
+
+# def clean_trace_chunk(trace, *, chunk_id=None, clean_agency=True, logger=None):
+#     """
+#     [Original docstring stays the same]
+#     """
+
+#     # Convert date strings to datetime objects
+#     cutoff_date = pd.to_datetime('2012-02-06')
+    
+#     trace['trd_exctn_dt'] = pd.to_datetime(trace['trd_exctn_dt'])
+#     trace['trd_rpt_dt'] = pd.to_datetime(trace['trd_rpt_dt'])
+        
+#     # Split data into pre and post 2012/02/06 based on reporting date
+#     post = trace[trace['trd_rpt_dt'] >= cutoff_date].copy()
+#     pre  = trace[trace['trd_rpt_dt'] < cutoff_date].copy()
+    
+#     # Apply additional filters for pre-2012-02-06 data
+#     if not pre.empty:
+#         # Convert indicators to string
+#         pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].astype(str)
+#         pre['wis_fl'] = pre['wis_fl'].astype(str)
+#         pre['lckd_in_ind'] = pre['lckd_in_ind'].astype(str)
+#         pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].astype(str)
+        
+#         # Replace NaN strings with 'None'
+#         pre['days_to_sttl_ct'] = pre['days_to_sttl_ct'].replace('nan', 'None')
+#         pre['wis_fl'] = pre['wis_fl'].replace('nan', 'None')
+#         pre['lckd_in_ind'] = pre['lckd_in_ind'].replace('nan', 'None')
+#         pre['sale_cndtn_cd'] = pre['sale_cndtn_cd'].replace('nan', 'None')
+        
+#         # 1) <= 2-day settlement ---------------------------------------------
+#         before = pre
+#         pre = pre[pre['days_to_sttl_ct'].isin({'000','001','002','None'})]
+#         if logger:
+#             logger(before, pre, "pre_settle_<=2d", chunk_id)
+    
+#         # 2) Exclude when-issued (wis_fl == 'Y') -----------------------------
+#         before = pre
+#         pre = pre[pre['wis_fl'] != 'Y']
+#         if logger:
+#             logger(before, pre, "pre_exclude_WIS", chunk_id)
+    
+#         # 3) Exclude locked-in (lckd_in_ind == 'Y') -------------------------
+#         before = pre
+#         pre = pre[pre['lckd_in_ind'] != 'Y']
+#         if logger:
+#             logger(before, pre, "pre_exclude_locked_in", chunk_id)
+    
+#         # 4) Exclude special conditions (sale_cndtn_cd not in {None, @}) ----
+#         before = pre
+#         pre = pre[pre['sale_cndtn_cd'].isin({'None','@'})]
+#         if logger:
+#             logger(before, pre, "pre_exclude_special_cond", chunk_id)
+    
+#     # ========================================
+#     # PARALLEL: Clean pre and post simultaneously
+#     # ========================================
+    
+#     with Pool(processes=2) as pool:
+#         # Submit both tasks
+#         post_future = pool.apply_async(
+#             clean_post_20120206, 
+#             (post,), 
+#             {'chunk_id': chunk_id, 'logger': log_ct_filter}
+#         ) if not post.empty else None
+        
+#         pre_future = pool.apply_async(
+#             clean_pre_20120206, 
+#             (pre,), 
+#             {'chunk_id': chunk_id, 'logger': log_ct_filter}
+#         ) if not pre.empty else None
+        
+#         # Collect results
+#         clean_post = post_future.get() if post_future else pd.DataFrame()
+#         clean_pre = pre_future.get() if pre_future else pd.DataFrame()
+    
+#     # Combine pre and post data
+#     clean_combined = pd.concat([clean_pre, clean_post], ignore_index=True)
+    
+#     # Apply agency transaction cleaning conditionally
+#     if clean_agency:
+#         clean_final = clean_agency_transactions(clean_combined) if not clean_combined.empty else pd.DataFrame()
+#         if logger:
+#             logger(clean_combined, clean_final,
+#                    stage="agency_cleaning", chunk_id=chunk_id)      
+#     else:
+#         clean_final = clean_combined  
+    
+#     return clean_final
 # -------------------------------------------------------------------------
 def clean_post_20120206(post, chunk_id=None, logger=None):
     """
