@@ -390,8 +390,6 @@ def compute_trace_all_metrics(trace):
     merged = merged.sort_values(['cusip_id','trd_exctn_dt']).reset_index(drop=True)
     return merged    
 # -------------------------------------------------------------------------
-TEST_RANGE = 442
-
 def clean_trace_data(
     db,
     cusip_chunks,
