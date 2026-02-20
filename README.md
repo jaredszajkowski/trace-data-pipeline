@@ -1,39 +1,42 @@
 Below is the original README for the [TRACE Data Pipeline](https://github.com/Alexander-M-Dickerson/trace-data-pipeline) project, a comprehensive pipeline for processing TRACE corporate bond transaction data.
 
-The motivation for this fork is to run the pipeline on a SLURM cluster, specifically, [The Unversity of Chicago's Research Computing Center](https://rcc.uchicago.edu/) Midway3 cluster.
+The motivation for this fork is to run the pipeline on a SLURM cluster, and specifically, [The Unversity of Chicago's Research Computing Center](https://rcc.uchicago.edu/) Midway3 cluster.
+
+The `main` branch is intended to be a version of the original repository that can be run on a SLURM cluster without multiprocessing, while the `multiprocess` branch introduces multiprocessing to reduce runtime. This allows for flexibility in execution environments, as some users may not have access to a cluster with multiprocessing capabilities or may prefer to run the pipeline without multiprocessing for other reasons (e.g., resource constraints).
 
 This fork modifies the original repository in the following ways:
 
 ### `main` Branch
 
-* Logging for the length of time required for each filter in the `clean_trace_data` function. This logging led to the modifications made to the `multiprocess_clean-pull-f1-f1pre-f1post` branch.
+* Implementation of `python-decouple` to handle environment variables, specifically for the WRDS username, author name, and email address.
+* Logging the execution time for each filter in the `clean_trace_data` function. This logging led to understanding the runtimes for each of the chunk filters and informed the modifications made to the `multiprocess` branch.
 * The `run_pipeline.sh` script has been modified as follows:
 
-  1. The disk capacity check has been disabled.
+  1. The disk capacity check has been disabled (commented out).
   2. The "qsub" sections have been removed and replaced with "wait" bash commands for the stage 0 and stage 1 dependencies.
 
 * The required `sbatch` file for scheduling on SLURM.
+* The script to submit the `sbatch` file to SLURM.
 
-### `multiprocess_clean-pull-f1-f1pre-f1post` Branch
+### `multiprocess` Branch
+
+The `multiprocess` branch includes the above changes to the `main` branch, and the following additional modifications to introduce multiprocessing:
 
 * The `_pull_all_chunks` function pulls all chunk data from WRDS sequentially and exports each chunk to a parquet file.
-* The `_f1_proc` function reads the parquet files from above, runs the initial cleaning and Filter 1: Dick-Nielsen, and exports the resulting `trace` DataFrame as a parquet file, individually for each chunk.
-* Subsequently, the `clean_trace_data` function reads the parquet files from above, and runs the remaining filters.
-* Within the `clean_trace_data` function, multiprocessing is introduced for the pulling of data from WRDS and the Filter 1: Dick-Nielsen, in order to run the processes in parallel. There are 5 CPUs required to take advantage of the multiprocessing, which are allocated as follows:
+* The `_f1_proc` function reads the parquet files from above, runs the initial cleaning and "Filter 1: Dick-Nielsen", and exports the resulting `trace`, `audit_records`, and `ct_audit_records` DataFrames as parquet files, individually for each chunk.
+* The `clean_trace_data` function reads the parquet files from above, and executes the remaining filters.
+* In order to run the processes in parallel, there are 5 CPUs required to take advantage of the multiprocessing, which are allocated as follows:
 
-  1. Initial execution of `run_pipeline.sh`, then focused on the `clean_trace_data` function.
+  1. Initial execution of `run_pipeline.sh` -> then `run_enhanced_trace.sh` -> then `clean_trace_data` function.
   2. `_pull_all_chunks` function (within the `clean_trace_data` function).
   3. `_f1_proc` function (within the `clean_trace_data` function).
-  4. `clean_post_20120206` function (within the `clean_trace_chunk` function which is within the `_f1_proc` function).
-  5. `clean_pre_20120206` function (within the `clean_trace_chunk` function which is within the `_f1_proc` function).
+  4. `run_standard_trace.sh` script.
+  5. `run_144a_trace.sh` script.
 
-* The `run_pipeline.sh` script has been modified as follows:
+Additional notes:
 
-  1. The disk capacity check has been disabled.
-  2. The "qsub" sections have been removed and replaced with "wait" bash commands for the stage 0 and stage 1 dependencies.
-
-* The required `sbatch` file for scheduling on SLURM.
-<!-- * Separates the original `run_pipeline.sh` into two scripts: `run_pipeline_stage0_partA.sh` and `run_pipeline_stage0_partB_stage1.sh`, allowing for job dependencies to be set up in the `sbatch` files -->
+* Unfortunately, due to the multiprocessing, the `trace_enhanced.log` is not fully sequential and contains interwoven messages from the different processes. However, the exported audit data has been sequenced properly within each process.
+* The multiprocessing implementation requires caching ~5 GB of data in parquet files at any given time. The parquet files are automatically deteleted after they are read in the next step of the process, but users should ensure they have sufficient disk space in their home directory to handle this temporary data.
 
 ### Quick Start
 
@@ -62,13 +65,29 @@ Created WRDS pgpass file
 $ chmod +x run_pipeline.sh
 ```
 
-5. Navigate to the project directory and run:
+6. Navigate to the project directory and run the following to to submit the job to SLURM and execute the pipeline:
 
 ```bash
 $ ./submit_trace_pipeline.sh
 ```
 
-to submit the job to SLURM and execute the pipeline.
+7. Check the status of the job with:
+
+```bash
+$ myq
+```
+
+8. To follow the output of the individual log files for each process in the `stage0/logs/` directory, use the following command:
+
+```bash
+$ tail -f stage0/logs/trace_enhanced.log # or trace_standard.log or trace_144a.log
+```
+
+9. To view the complete log file during or after the process has completed, use the following command:
+
+```bash
+$ less stage0/logs/trace_enhanced.log # or trace_standard.log or trace_144a.log
+```
 
 # TRACE Data Pipeline (Original README)
 
