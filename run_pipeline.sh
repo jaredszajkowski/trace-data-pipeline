@@ -200,27 +200,28 @@ fi
 # echo "[submit] Stage 1 pipeline (waits for stage0 reports) ..."
 # J5=$(qsub -terse -N stage1_pipeline -hold_jid ${J4} stage1/run_stage1.sh)
 
-# Stage 0: Run Enhanced, Standard, and 144A TRACE data extraction jobs sequentially
+# Stage 0: Submit Enhanced, Standard, and 144A TRACE data extraction jobs
+# These run in parallel and use the stage0 directory as working directory
 echo ""
 echo "=== STAGE 0: TRACE Data Extraction ==="
 
 echo "[running] Enhanced TRACE ..."
 bash stage0/run_enhanced_trace.sh > stage0/logs/trace_enhanced.log 2>&1 &
 J1=$!
-wait $J1
-echo "[ok] Enhanced TRACE completed"
+# wait $J1
+# echo "[ok] Enhanced TRACE completed"
 
 echo "[running] Standard TRACE ..."
 bash stage0/run_standard_trace.sh > stage0/logs/trace_standard.log 2>&1 &
 J2=$!
-wait $J2
-echo "[ok] Standard TRACE completed"
+# wait $J2
+# echo "[ok] Standard TRACE completed"
 
 echo "[running] 144A TRACE ..."
 bash stage0/run_144a_trace.sh > stage0/logs/trace_144a.log 2>&1 &
 J3=$!
-wait $J3
-echo "[ok] 144A TRACE completed"
+# wait $J3
+# echo "[ok] 144A TRACE completed"
 
 # Wait for all three TRACE extraction jobs to complete
 echo "[waiting] Waiting for all TRACE extraction jobs..."
@@ -270,7 +271,7 @@ echo ""
 # echo "  Stage 2 - Advanced (waits for stage1):"
 # echo "    Stage2 Pipeline: ${J6}"
 # echo ""
-echo "Monitor jobs with: myq" # qstat"
+# echo "Monitor jobs with: qstat"
 echo "Check logs in: stage0/logs/, stage1/logs/"
 echo "Downloaded data in: stage1/data/"
 echo ""

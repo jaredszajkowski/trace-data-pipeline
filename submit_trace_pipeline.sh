@@ -22,3 +22,12 @@ fi
 
 # Submit job with email parameter
 sbatch --mail-type=ALL --mail-user=${SLURM_EMAIL} trace-data-pipeline.sbatch
+
+# STAGE 0 Part A: TRACE Enhanced, Standard, 144A Data Extraction
+# JOB1=$(sbatch --parsable --mail-type=ALL --mail-user=${SLURM_EMAIL} trace-data-pipeline_stage0_partA.sbatch)
+# echo "STAGE 0 Part A: TRACE Enhanced, Standard, 144A Data Extraction: $JOB1"
+
+# STAGE 0 Part B: TRACE Enhanced Process, Build Data Reports
+# STAGE 1: Daily Aggregation & Analytics
+# JOB2=$(sbatch --parsable --dependency=afterok:$JOB1 --mail-type=ALL --mail-user=${SLURM_EMAIL} trace-data-pipeline_stage0_partB_stage1.sbatch)
+# echo "STAGE 0 Part B: TRACE Enhanced Process, Build Data Reports and STAGE 1: Daily Aggregation & Analytics: $JOB2 (depends on $JOB1)"
