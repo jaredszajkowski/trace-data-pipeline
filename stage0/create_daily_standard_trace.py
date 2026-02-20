@@ -707,7 +707,7 @@ def clean_trace_data(
     for i, temp_list in enumerate(cusip_chunks, start=1):
         start_time = time.time()
         logging.info(f"Processing chunk {i} of {len(cusip_chunks)}")
-        print(f"Processing chunk {i} of {len(cusip_chunks)}")
+        # print(f"Processing chunk {i} of {len(cusip_chunks)}")
 
         temp_tuple = tuple(temp_list)
 
